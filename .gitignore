@@ -1,0 +1,33 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables (SECRETS)
+.env
+.env.*
+
+# Local databases
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.black_cache/
+.black_cache_local/
+
+# VSCode
+.vscode/
+
+# Coverage
+.coverage
+
+# Egg info
+*.egg-info/
