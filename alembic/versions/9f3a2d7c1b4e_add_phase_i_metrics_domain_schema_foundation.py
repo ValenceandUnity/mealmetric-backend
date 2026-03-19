@@ -135,7 +135,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "expenditure_calories >= 0",
-            name="ck_activity_expenditure_records_expenditure_calories_non_negative",
+            name="ck_activity_exp_records_expend_cal_nonneg",
         ),
         sa.CheckConstraint(
             "activity_minutes IS NULL OR activity_minutes >= 0",
