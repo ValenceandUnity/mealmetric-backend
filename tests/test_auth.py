@@ -211,6 +211,33 @@ def test_register_returns_503_when_users_schema_is_stale(
     assert response.json() == {"detail": "db_schema_mismatch"}
 
 
+def test_register_returns_503_and_logs_stage_for_unexpected_errors(
+    auth_client: TestClient,
+    bff_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _raise_runtime_error(_plain: str) -> str:
+        raise RuntimeError("hash backend unavailable")
+
+    monkeypatch.setattr(auth_routes, "hash_password", _raise_runtime_error)
+    caplog.set_level("ERROR", logger="mealmetric.auth")
+
+    response = auth_client.post(
+        "/auth/register",
+        json={"email": "unexpected-error@example.com", "password": "securepass1", "role": "client"},
+        headers=bff_headers,
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "register_unavailable"}
+    assert any(
+        record.message == "register failed unexpectedly"
+        and getattr(record, "stage", None) == "hash_password"
+        for record in caplog.records
+    )
+
+
 def test_me_requires_jwt(auth_client: TestClient, bff_headers: dict[str, str]) -> None:
     response = auth_client.get("/auth/me", headers=bff_headers)
     assert response.status_code == 401

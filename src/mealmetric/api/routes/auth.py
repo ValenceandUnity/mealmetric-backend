@@ -50,12 +50,16 @@ def register(payload: RegisterRequest, request: Request, db: DBSessionDep) -> To
         )
 
     auth_service = AuthService(db)
+    stage = "hash_password"
     try:
+        password_hash = hash_password(payload.password)
+        stage = "register_user"
         user = auth_service.register_user(
             email=str(payload.email),
-            password_hash=hash_password(payload.password),
+            password_hash=password_hash,
             role=payload.role,
         )
+        stage = "create_access_token"
         token = create_access_token(
             subject_email=user.email,
             user_id=user.id,
@@ -63,6 +67,7 @@ def register(payload: RegisterRequest, request: Request, db: DBSessionDep) -> To
             token_version=user.token_version,
             expires_minutes=get_settings().access_token_expire_minutes,
         )
+        stage = "commit"
         db.commit()
     except EmailAlreadyRegisteredError as exc:
         db.rollback()
@@ -88,6 +93,19 @@ def register(payload: RegisterRequest, request: Request, db: DBSessionDep) -> To
                 detail="db_schema_mismatch",
             ) from exc
         raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "register failed unexpectedly",
+            extra={
+                "request_id": getattr(request.state, "request_id", "-"),
+                "stage": stage,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="register_unavailable",
+        ) from exc
     return TokenResponse(access_token=token)
 
 
