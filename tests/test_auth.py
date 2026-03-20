@@ -5,7 +5,7 @@ from typing import Annotated
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -156,6 +156,59 @@ def test_register_returns_503_and_rolls_back_when_token_creation_fails(
     with app.state.testing_session_local() as session:
         user = session.scalar(select(User).where(User.email == "jwt-fail@example.com"))
         assert user is None
+
+
+def test_register_returns_503_when_users_schema_is_stale(
+    bff_headers: dict[str, str],
+) -> None:
+    get_settings.cache_clear()
+    app = create_app()
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    email TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'client',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE UNIQUE INDEX ix_users_email ON users (email)"))
+
+    testing_session_local = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine,
+        class_=Session,
+        expire_on_commit=False,
+    )
+
+    def _override_get_db() -> Generator[Session, None, None]:
+        db = testing_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as client:
+        response = client.post(
+            "/auth/register",
+            json={"email": "stale-schema@example.com", "password": "securepass1", "role": "client"},
+            headers=bff_headers,
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "db_schema_mismatch"}
 
 
 def test_me_requires_jwt(auth_client: TestClient, bff_headers: dict[str, str]) -> None:

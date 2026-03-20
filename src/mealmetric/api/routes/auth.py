@@ -1,6 +1,8 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from mealmetric.api.deps.auth import get_current_user, require_trusted_caller
@@ -23,10 +25,24 @@ protected_router = APIRouter(
     dependencies=[Depends(require_trusted_caller), Depends(get_current_user)]
 )
 DBSessionDep = Annotated[Session | None, Depends(get_db)]
+logger = logging.getLogger("mealmetric.auth")
+
+
+def _is_register_schema_mismatch_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    patterns = (
+        "no such column",
+        "has no column named",
+        "undefinedcolumn",
+        "no such table",
+        "does not exist",
+        "undefinedtable",
+    )
+    return any(pattern in message for pattern in patterns)
 
 
 @public_router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: DBSessionDep) -> TokenResponse:
+def register(payload: RegisterRequest, request: Request, db: DBSessionDep) -> TokenResponse:
     if db is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -60,6 +76,18 @@ def register(payload: RegisterRequest, db: DBSessionDep) -> TokenResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="token_service_unavailable",
         ) from exc
+    except (OperationalError, ProgrammingError) as exc:
+        db.rollback()
+        if _is_register_schema_mismatch_error(exc):
+            logger.exception(
+                "register failed due to database schema mismatch",
+                extra={"request_id": getattr(request.state, "request_id", "-")},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="db_schema_mismatch",
+            ) from exc
+        raise
     return TokenResponse(access_token=token)
 
 
