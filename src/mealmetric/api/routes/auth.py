@@ -69,6 +69,8 @@ def register(payload: RegisterRequest, request: Request, db: DBSessionDep) -> To
         )
         stage = "commit"
         db.commit()
+        stage = "response_model"
+        response = TokenResponse(access_token=token)
     except EmailAlreadyRegisteredError as exc:
         db.rollback()
         raise HTTPException(
@@ -106,7 +108,7 @@ def register(payload: RegisterRequest, request: Request, db: DBSessionDep) -> To
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="register_unavailable",
         ) from exc
-    return TokenResponse(access_token=token)
+    return response
 
 
 @public_router.post("/login", response_model=TokenResponse)
