@@ -1,8 +1,9 @@
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from mealmetric.db import session as db_session
-from mealmetric.models.user import User
+from mealmetric.models.user import Role, User
 from mealmetric.repos.user_repo import UserRepository
 from mealmetric.services.user_service import UserService
 
@@ -20,6 +21,14 @@ def test_user_model_defaults() -> None:
 
     assert user.email == "user@example.com"
     assert user.role is None
+
+
+def test_user_role_enum_binds_lowercase_values_for_postgres() -> None:
+    bind_processor = User.__table__.c.role.type.bind_processor(postgresql.dialect())
+    assert bind_processor is not None
+
+    assert bind_processor(Role.CLIENT) == "client"
+    assert bind_processor(Role.PT) == "pt"
 
 
 def test_repo_and_service_lookup() -> None:
