@@ -15,7 +15,7 @@ from mealmetric.core.settings import get_settings
 from mealmetric.db.session import get_db
 from mealmetric.models.user import User
 from mealmetric.services.auth_service import AuthService, EmailAlreadyRegisteredError
-from mealmetric.services.jwt_service import create_access_token
+from mealmetric.services.jwt_service import JWTError, create_access_token
 from mealmetric.services.security import hash_password
 
 public_router = APIRouter(dependencies=[Depends(require_trusted_caller)])
@@ -40,6 +40,13 @@ def register(payload: RegisterRequest, db: DBSessionDep) -> TokenResponse:
             password_hash=hash_password(payload.password),
             role=payload.role,
         )
+        token = create_access_token(
+            subject_email=user.email,
+            user_id=user.id,
+            role=user.role,
+            token_version=user.token_version,
+            expires_minutes=get_settings().access_token_expire_minutes,
+        )
         db.commit()
     except EmailAlreadyRegisteredError as exc:
         db.rollback()
@@ -47,14 +54,12 @@ def register(payload: RegisterRequest, db: DBSessionDep) -> TokenResponse:
             status_code=status.HTTP_409_CONFLICT,
             detail="Email is already registered.",
         ) from exc
-
-    token = create_access_token(
-        subject_email=user.email,
-        user_id=user.id,
-        role=user.role,
-        token_version=user.token_version,
-        expires_minutes=get_settings().access_token_expire_minutes,
-    )
+    except JWTError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="token_service_unavailable",
+        ) from exc
     return TokenResponse(access_token=token)
 
 

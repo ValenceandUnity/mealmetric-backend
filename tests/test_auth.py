@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from mealmetric.api.deps.auth import require_roles
+from mealmetric.api.routes import auth as auth_routes
 from mealmetric.core.app import create_app
 from mealmetric.core.security import token_denylist
 from mealmetric.core.settings import get_settings
@@ -19,6 +20,7 @@ from mealmetric.models.auth_failure_tracker import AuthFailureTracker
 from mealmetric.models.role import Role as NormalizedRole
 from mealmetric.models.user import Role, User
 from mealmetric.models.user_role import UserRole
+from mealmetric.services.jwt_service import JWTError
 
 
 @pytest.fixture
@@ -127,6 +129,33 @@ def test_duplicate_email_returns_409(auth_client: TestClient, bff_headers: dict[
         headers=bff_headers,
     )
     assert response.status_code == 409
+
+
+def test_register_returns_503_and_rolls_back_when_token_creation_fails(
+    auth_client: TestClient,
+    bff_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = auth_client.app
+    assert isinstance(app, FastAPI)
+
+    def _raise_jwt_error(**_kwargs):  # type: ignore[no-untyped-def]
+        raise JWTError("token signing unavailable")
+
+    monkeypatch.setattr(auth_routes, "create_access_token", _raise_jwt_error)
+
+    response = auth_client.post(
+        "/auth/register",
+        json={"email": "jwt-fail@example.com", "password": "securepass1", "role": "client"},
+        headers=bff_headers,
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "token_service_unavailable"}
+
+    with app.state.testing_session_local() as session:
+        user = session.scalar(select(User).where(User.email == "jwt-fail@example.com"))
+        assert user is None
 
 
 def test_me_requires_jwt(auth_client: TestClient, bff_headers: dict[str, str]) -> None:
