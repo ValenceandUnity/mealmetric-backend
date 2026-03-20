@@ -75,10 +75,21 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def metrics_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
-        response = await call_next(request)
+        request_id = getattr(request.state, "request_id", "-")
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception(
+                "unhandled request exception",
+                extra={
+                    "request_id": request_id,
+                    "path": request.url.path,
+                    "method": request.method,
+                },
+            )
+            raise
         route_obj = request.scope.get("route")
         route = getattr(route_obj, "path", "unmatched")
-        request_id = getattr(request.state, "request_id", "-")
         HTTP_REQUESTS_TOTAL.labels(
             route=route, method=request.method, status=str(response.status_code)
         ).inc()

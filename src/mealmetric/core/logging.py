@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import traceback
 from datetime import UTC, datetime
 
 from mealmetric.core.middleware.request_id import get_request_id
@@ -22,6 +23,11 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "request_id": getattr(record, "request_id", "-"),
         }
+        if record.exc_info:
+            payload["exc_type"] = record.exc_info[0].__name__ if record.exc_info[0] else None
+            payload["traceback"] = "".join(traceback.format_exception(*record.exc_info))
+        elif record.stack_info:
+            payload["traceback"] = self.formatStack(record.stack_info)
         return json.dumps(payload)
 
 
