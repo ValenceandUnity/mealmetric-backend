@@ -2,7 +2,6 @@ import json
 import logging
 import sys
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from mealmetric.core.app import create_app

@@ -6,7 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mealmetric.models.audit_log import AuditEventAction, AuditEventCategory
-from mealmetric.models.recommendation import MealPlanRecommendation, MealPlanRecommendationStatus
+from mealmetric.models.recommendation import (
+    MealPlanRecommendation,
+    MealPlanRecommendationStatus,
+)
 from mealmetric.models.training import PtClientLinkStatus
 from mealmetric.models.user import Role
 from mealmetric.models.vendor import (
@@ -17,7 +20,13 @@ from mealmetric.models.vendor import (
     VendorPickupWindowStatus,
     VendorStatus,
 )
-from mealmetric.repos import audit_log_repo, recommendation_repo, training_repo, vendor_repo
+from mealmetric.repos import (
+    audit_log_repo,
+    recommendation_repo,
+    training_repo,
+    user_repo,
+    vendor_repo,
+)
 
 _AVAILABLE_PICKUP_WINDOW_STATUSES = frozenset(
     {
@@ -68,6 +77,13 @@ class RecommendationMealPlanSummaryView:
 
 
 @dataclass(frozen=True, slots=True)
+class RecommendationPtAttributionView:
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class MealPlanRecommendationView:
     id: uuid.UUID
     pt_user_id: uuid.UUID
@@ -80,6 +96,7 @@ class MealPlanRecommendationView:
     is_expired: bool
     created_at: datetime
     updated_at: datetime
+    pt: RecommendationPtAttributionView
     meal_plan: RecommendationMealPlanSummaryView
     meal_plan_is_currently_discoverable: bool
     meal_plan_is_currently_available: bool
@@ -131,7 +148,9 @@ class MealPlanRecommendationService:
                 expires_at=expires_at,
             )
         except IntegrityError as exc:
-            raise RecommendationConflictError("meal_plan_recommendation_conflict") from exc
+            raise RecommendationConflictError(
+                "meal_plan_recommendation_conflict"
+            ) from exc
 
         audit_log_repo.append_event(
             self._session,
@@ -218,10 +237,14 @@ class MealPlanRecommendationService:
         self,
         recommendations: list[MealPlanRecommendation],
     ) -> MealPlanRecommendationListView:
-        items = tuple(self._to_view(recommendation) for recommendation in recommendations)
+        items = tuple(
+            self._to_view(recommendation) for recommendation in recommendations
+        )
         return MealPlanRecommendationListView(items=items, count=len(items))
 
-    def _to_view(self, recommendation: MealPlanRecommendation) -> MealPlanRecommendationView:
+    def _to_view(
+        self, recommendation: MealPlanRecommendation
+    ) -> MealPlanRecommendationView:
         meal_plan = recommendation.meal_plan
         summary = self._build_meal_plan_summary(meal_plan)
         currently_available = self._meal_plan_is_currently_available(meal_plan)
@@ -241,12 +264,29 @@ class MealPlanRecommendationService:
             is_expired=self._is_expired(recommendation.expires_at),
             created_at=recommendation.created_at,
             updated_at=recommendation.updated_at,
+            pt=self._build_pt_attribution(recommendation.pt_user_id),
             meal_plan=summary,
             meal_plan_is_currently_discoverable=currently_discoverable,
             meal_plan_is_currently_available=currently_available,
         )
 
-    def _build_meal_plan_summary(self, meal_plan: MealPlan) -> RecommendationMealPlanSummaryView:
+    def _build_pt_attribution(
+        self,
+        pt_user_id: uuid.UUID,
+    ) -> RecommendationPtAttributionView:
+        user = user_repo.get_by_id(self._session, pt_user_id)
+        if user is None:
+            raise RecommendationNotFoundError("recommendation_pt_user_not_found")
+        profile = training_repo.get_pt_profile_by_user_id(self._session, pt_user_id)
+        return RecommendationPtAttributionView(
+            id=user.id,
+            email=user.email,
+            display_name=profile.display_name if profile is not None else None,
+        )
+
+    def _build_meal_plan_summary(
+        self, meal_plan: MealPlan
+    ) -> RecommendationMealPlanSummaryView:
         ordered_items = sorted(
             meal_plan.items,
             key=lambda item: (item.position, str(item.id)),
@@ -259,7 +299,8 @@ class MealPlanRecommendationService:
             item.vendor_menu_item.price_cents * item.quantity for item in ordered_items
         )
         total_calories = sum(
-            (item.vendor_menu_item.calories or 0) * item.quantity for item in ordered_items
+            (item.vendor_menu_item.calories or 0) * item.quantity
+            for item in ordered_items
         )
         return RecommendationMealPlanSummaryView(
             id=meal_plan.id,
@@ -278,7 +319,9 @@ class MealPlanRecommendationService:
         return any(
             availability.status in _AVAILABLE_AVAILABILITY_STATUSES
             and availability.pickup_window.status in _AVAILABLE_PICKUP_WINDOW_STATUSES
-            and (availability.inventory_count is None or availability.inventory_count > 0)
+            and (
+                availability.inventory_count is None or availability.inventory_count > 0
+            )
             for availability in meal_plan.availability_entries
         )
 
@@ -296,7 +339,8 @@ class MealPlanRecommendationService:
         if not meal_plan.items:
             return False
         if any(
-            item.vendor_menu_item.status != VendorMenuItemStatus.ACTIVE for item in meal_plan.items
+            item.vendor_menu_item.status != VendorMenuItemStatus.ACTIVE
+            for item in meal_plan.items
         ):
             return False
         return currently_available

@@ -42,6 +42,7 @@ class MetricsFreshness:
 @dataclass(frozen=True, slots=True)
 class WeeklyMetricsView:
     client_user_id: uuid.UUID
+    as_of_date: date
     week_start_date: date
     week_end_date: date
     business_timezone: str
@@ -51,6 +52,8 @@ class WeeklyMetricsView:
     net_calorie_balance: int
     weekly_target_deficit_calories: int | None
     deficit_progress_percent: Decimal | None
+    current_intake_ceiling_calories: int | None
+    current_expenditure_floor_calories: int | None
     has_data: bool
     freshness: MetricsFreshness
 
@@ -135,10 +138,14 @@ class MetricsService:
             weekly_target_deficit_calories=weekly_view.weekly_target_deficit_calories,
             deficit_progress_percent=weekly_view.deficit_progress_percent,
             current_intake_ceiling_calories=(
-                snapshot.current_intake_ceiling_calories if snapshot is not None else None
+                snapshot.current_intake_ceiling_calories
+                if snapshot is not None
+                else None
             ),
             current_expenditure_floor_calories=(
-                snapshot.current_expenditure_floor_calories if snapshot is not None else None
+                snapshot.current_expenditure_floor_calories
+                if snapshot is not None
+                else None
             ),
             has_data=weekly_view.has_data,
             freshness=weekly_view.freshness,
@@ -199,8 +206,12 @@ class MetricsService:
         client_user_id: uuid.UUID,
         as_of_date: date | None = None,
     ) -> OverviewMetricsView:
-        self._require_active_pt_client_link(pt_user_id=pt_user_id, client_user_id=client_user_id)
-        return self.get_client_overview(client_user_id=client_user_id, as_of_date=as_of_date)
+        self._require_active_pt_client_link(
+            pt_user_id=pt_user_id, client_user_id=client_user_id
+        )
+        return self.get_client_overview(
+            client_user_id=client_user_id, as_of_date=as_of_date
+        )
 
     def get_pt_client_weekly_metrics(
         self,
@@ -209,7 +220,9 @@ class MetricsService:
         client_user_id: uuid.UUID,
         week_start_date: date,
     ) -> WeeklyMetricsView:
-        self._require_active_pt_client_link(pt_user_id=pt_user_id, client_user_id=client_user_id)
+        self._require_active_pt_client_link(
+            pt_user_id=pt_user_id, client_user_id=client_user_id
+        )
         return self.get_client_weekly_metrics(
             client_user_id=client_user_id,
             week_start_date=week_start_date,
@@ -223,7 +236,9 @@ class MetricsService:
         weeks: int,
         as_of_date: date | None = None,
     ) -> MetricsHistoryView:
-        self._require_active_pt_client_link(pt_user_id=pt_user_id, client_user_id=client_user_id)
+        self._require_active_pt_client_link(
+            pt_user_id=pt_user_id, client_user_id=client_user_id
+        )
         return self.get_client_metrics_history(
             client_user_id=client_user_id,
             weeks=weeks,
@@ -359,6 +374,7 @@ class MetricsService:
 
         return WeeklyMetricsView(
             client_user_id=client_user_id,
+            as_of_date=week_end,
             week_start_date=week_start,
             week_end_date=week_end,
             business_timezone=_BUSINESS_TZ_NAME,
@@ -368,6 +384,16 @@ class MetricsService:
             net_calorie_balance=0,
             weekly_target_deficit_calories=weekly_target,
             deficit_progress_percent=None,
+            current_intake_ceiling_calories=(
+                snapshot.current_intake_ceiling_calories
+                if snapshot is not None
+                else None
+            ),
+            current_expenditure_floor_calories=(
+                snapshot.current_expenditure_floor_calories
+                if snapshot is not None
+                else None
+            ),
             has_data=False,
             freshness=MetricsFreshness(
                 source="empty",
@@ -415,6 +441,7 @@ class MetricsService:
 
         return WeeklyMetricsView(
             client_user_id=client_user_id,
+            as_of_date=week_end,
             week_start_date=week_start,
             week_end_date=week_end,
             business_timezone=_BUSINESS_TZ_NAME,
@@ -424,6 +451,16 @@ class MetricsService:
             net_calorie_balance=net_balance,
             weekly_target_deficit_calories=weekly_target,
             deficit_progress_percent=progress,
+            current_intake_ceiling_calories=(
+                snapshot.current_intake_ceiling_calories
+                if snapshot is not None
+                else None
+            ),
+            current_expenditure_floor_calories=(
+                snapshot.current_expenditure_floor_calories
+                if snapshot is not None
+                else None
+            ),
             has_data=True,
             freshness=MetricsFreshness(
                 source="raw",
@@ -431,8 +468,12 @@ class MetricsService:
                 snapshot_generated_at=(
                     snapshot.snapshot_generated_at if snapshot is not None else None
                 ),
-                source_window_start=min(source_time_candidates) if source_time_candidates else None,
-                source_window_end=max(source_time_candidates) if source_time_candidates else None,
+                source_window_start=(
+                    min(source_time_candidates) if source_time_candidates else None
+                ),
+                source_window_end=(
+                    max(source_time_candidates) if source_time_candidates else None
+                ),
                 version=None,
             ),
         )
@@ -462,6 +503,7 @@ class MetricsService:
 
         return WeeklyMetricsView(
             client_user_id=client_user_id,
+            as_of_date=week_end,
             week_start_date=week_start,
             week_end_date=week_end,
             business_timezone=_BUSINESS_TZ_NAME,
@@ -471,6 +513,16 @@ class MetricsService:
             net_calorie_balance=rollup.net_calorie_balance,
             weekly_target_deficit_calories=weekly_target,
             deficit_progress_percent=progress,
+            current_intake_ceiling_calories=(
+                snapshot.current_intake_ceiling_calories
+                if snapshot is not None
+                else None
+            ),
+            current_expenditure_floor_calories=(
+                snapshot.current_expenditure_floor_calories
+                if snapshot is not None
+                else None
+            ),
             has_data=True,
             freshness=MetricsFreshness(
                 source="weekly_rollup",
@@ -516,6 +568,7 @@ class MetricsService:
 
         return WeeklyMetricsView(
             client_user_id=client_user_id,
+            as_of_date=week_end,
             week_start_date=week_start,
             week_end_date=week_end,
             business_timezone=_BUSINESS_TZ_NAME,
@@ -525,6 +578,8 @@ class MetricsService:
             net_calorie_balance=net_balance,
             weekly_target_deficit_calories=weekly_target,
             deficit_progress_percent=progress,
+            current_intake_ceiling_calories=snapshot.current_intake_ceiling_calories,
+            current_expenditure_floor_calories=snapshot.current_expenditure_floor_calories,
             has_data=True,
             freshness=MetricsFreshness(
                 source="snapshot",
@@ -549,7 +604,9 @@ class MetricsService:
         return active_target.target_daily_deficit_calories * _DAYS_PER_WEEK
 
     @staticmethod
-    def _to_comparison_item(weekly_view: WeeklyMetricsView) -> PTComparisonMetricsItemView:
+    def _to_comparison_item(
+        weekly_view: WeeklyMetricsView,
+    ) -> PTComparisonMetricsItemView:
         return PTComparisonMetricsItemView(
             client_user_id=weekly_view.client_user_id,
             total_intake_calories=weekly_view.total_intake_calories,
@@ -567,7 +624,10 @@ class MetricsService:
         weekly_target_deficit_calories: int | None,
         net_calorie_balance: int,
     ) -> Decimal | None:
-        if weekly_target_deficit_calories is None or weekly_target_deficit_calories <= 0:
+        if (
+            weekly_target_deficit_calories is None
+            or weekly_target_deficit_calories <= 0
+        ):
             return None
 
         achieved_deficit = Decimal(str(-net_calorie_balance))

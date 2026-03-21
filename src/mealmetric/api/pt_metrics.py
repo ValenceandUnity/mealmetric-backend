@@ -5,7 +5,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from mealmetric.api.deps.auth import get_current_user, require_roles, require_trusted_caller
+from mealmetric.api.deps.auth import (
+    get_current_user,
+    require_roles,
+    require_trusted_caller,
+)
 from mealmetric.api.schemas.metrics import (
     MetricsFreshnessResponse,
     MetricsHistoryResponse,
@@ -53,7 +57,9 @@ def _translate_service_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="internal_error",
         )
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error")
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error"
+    )
 
 
 def _parse_iso_date(raw: str | None, detail: str) -> date | None:
@@ -81,6 +87,7 @@ def _freshness_to_response(freshness: MetricsFreshness) -> MetricsFreshnessRespo
 def _weekly_to_response(view: WeeklyMetricsView) -> WeeklyMetricsResponse:
     return WeeklyMetricsResponse(
         client_user_id=view.client_user_id,
+        as_of_date=view.as_of_date,
         week_start_date=view.week_start_date,
         week_end_date=view.week_end_date,
         business_timezone=view.business_timezone,
@@ -90,6 +97,8 @@ def _weekly_to_response(view: WeeklyMetricsView) -> WeeklyMetricsResponse:
         net_calorie_balance=view.net_calorie_balance,
         weekly_target_deficit_calories=view.weekly_target_deficit_calories,
         deficit_progress_percent=view.deficit_progress_percent,
+        current_intake_ceiling_calories=view.current_intake_ceiling_calories,
+        current_expenditure_floor_calories=view.current_expenditure_floor_calories,
         has_data=view.has_data,
         freshness=_freshness_to_response(view.freshness),
     )
@@ -130,7 +139,9 @@ def _comparison_item_to_response(
     )
 
 
-def _comparison_to_response(view: PTComparisonMetricsView) -> PTComparisonMetricsResponse:
+def _comparison_to_response(
+    view: PTComparisonMetricsView,
+) -> PTComparisonMetricsResponse:
     items = [_comparison_item_to_response(item) for item in view.items]
     return PTComparisonMetricsResponse(
         week_start_date=view.week_start_date,
@@ -194,7 +205,9 @@ def get_pt_client_metrics_weekly(
     return _weekly_to_response(view)
 
 
-@router.get("/clients/{client_id}/metrics/history", response_model=MetricsHistoryResponse)
+@router.get(
+    "/clients/{client_id}/metrics/history", response_model=MetricsHistoryResponse
+)
 def get_pt_client_metrics_history(
     client_id: UUID,
     db: DBSessionDep,
@@ -217,11 +230,56 @@ def get_pt_client_metrics_history(
         raise _translate_service_error(exc) from exc
 
     items = [_weekly_to_response(item) for item in view.weeks]
+    latest_week = items[0] if items else None
     return MetricsHistoryResponse(
         client_user_id=view.client_user_id,
         as_of_date=view.as_of_date,
+        week_start_date=(
+            latest_week.week_start_date if latest_week is not None else None
+        ),
+        week_end_date=latest_week.week_end_date if latest_week is not None else None,
         business_timezone=view.business_timezone,
         week_start_day=view.week_start_day,
+        total_intake_calories=(
+            latest_week.total_intake_calories if latest_week is not None else 0
+        ),
+        total_expenditure_calories=(
+            latest_week.total_expenditure_calories if latest_week is not None else 0
+        ),
+        net_calorie_balance=(
+            latest_week.net_calorie_balance if latest_week is not None else 0
+        ),
+        weekly_target_deficit_calories=(
+            latest_week.weekly_target_deficit_calories
+            if latest_week is not None
+            else None
+        ),
+        deficit_progress_percent=(
+            latest_week.deficit_progress_percent if latest_week is not None else None
+        ),
+        current_intake_ceiling_calories=(
+            latest_week.current_intake_ceiling_calories
+            if latest_week is not None
+            else None
+        ),
+        current_expenditure_floor_calories=(
+            latest_week.current_expenditure_floor_calories
+            if latest_week is not None
+            else None
+        ),
+        has_data=latest_week.has_data if latest_week is not None else False,
+        freshness=(
+            latest_week.freshness
+            if latest_week is not None
+            else MetricsFreshnessResponse(
+                source="empty",
+                computed_at=None,
+                snapshot_generated_at=None,
+                source_window_start=None,
+                source_window_end=None,
+                version=None,
+            )
+        ),
         weeks=items,
         count=len(items),
     )
@@ -231,7 +289,9 @@ def get_pt_client_metrics_history(
 def get_pt_metrics_comparison(
     db: DBSessionDep,
     current_user: CurrentUserDep,
-    week_start_date: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    week_start_date: Annotated[
+        str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    ] = None,
     as_of_date: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
     client_ids: Annotated[list[UUID] | None, Query()] = None,
 ) -> PTComparisonMetricsResponse:

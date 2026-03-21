@@ -44,6 +44,8 @@ def _meal_plan_summary_to_read(view: MealPlanSummaryView) -> MealPlanSummaryRead
     return MealPlanSummaryRead(
         id=view.id,
         vendor_id=view.vendor_id,
+        vendor_name=view.vendor_name,
+        vendor_zip_code=view.vendor_zip_code,
         slug=view.slug,
         name=view.name,
         description=view.description,

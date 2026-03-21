@@ -15,7 +15,10 @@ from mealmetric.core.settings import get_settings
 from mealmetric.db.base import Base
 from mealmetric.db.session import get_db
 from mealmetric.models.audit_log import AuditEventAction, AuditEventCategory, AuditLog
-from mealmetric.models.recommendation import MealPlanRecommendation, MealPlanRecommendationStatus
+from mealmetric.models.recommendation import (
+    MealPlanRecommendation,
+    MealPlanRecommendationStatus,
+)
 from mealmetric.models.training import PtClientLink, PtClientLinkStatus
 from mealmetric.models.user import User
 from mealmetric.models.vendor import (
@@ -269,7 +272,9 @@ def test_recommendation_routes_require_signed_bff_jwt_and_expected_roles(
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    pt_headers, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
+    pt_headers, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
     client_headers, client_user_id = _register_user(
         meal_plan_recommendations_api_client, bff_headers, "client"
     )
@@ -307,7 +312,9 @@ def test_recommendation_routes_return_stable_empty_lists(
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    pt_headers, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
+    pt_headers, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
     client_headers, client_user_id = _register_user(
         meal_plan_recommendations_api_client, bff_headers, "client"
     )
@@ -335,12 +342,18 @@ def test_pt_can_create_and_read_only_scoped_recommendations(
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    pt_headers, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
-    _, second_pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
+    pt_headers, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
+    _, second_pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
     _, second_client_user_id = _register_user(
         meal_plan_recommendations_api_client, bff_headers, "client"
     )
-    _, client_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "client")
+    _, client_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "client"
+    )
 
     with _session_local(meal_plan_recommendations_api_client)() as db:
         _, visible_plan_id, _ = _create_vendor_catalog(db)
@@ -377,6 +390,7 @@ def test_pt_can_create_and_read_only_scoped_recommendations(
     assert create_response.status_code == 201
     created_payload = create_response.json()
     assert created_payload["rationale"] == "High protein fit"
+    assert created_payload["pt"]["id"] == str(pt_user_id)
     assert created_payload["meal_plan"]["slug"] == "lean-pack"
     assert created_payload["meal_plan_is_currently_discoverable"] is True
     assert created_payload["meal_plan_is_currently_available"] is True
@@ -390,6 +404,7 @@ def test_pt_can_create_and_read_only_scoped_recommendations(
     payload = list_response.json()
     assert payload["count"] == 1
     assert payload["items"][0]["pt_user_id"] == str(pt_user_id)
+    assert payload["items"][0]["pt"]["id"] == str(pt_user_id)
     assert payload["items"][0]["client_user_id"] == str(client_user_id)
     assert payload["items"][0]["rationale"] == "High protein fit"
 
@@ -397,7 +412,9 @@ def test_pt_can_create_and_read_only_scoped_recommendations(
         audit_rows = list(
             db.scalars(
                 select(AuditLog)
-                .where(AuditLog.action == AuditEventAction.MEAL_PLAN_RECOMMENDATION_CREATED)
+                .where(
+                    AuditLog.action == AuditEventAction.MEAL_PLAN_RECOMMENDATION_CREATED
+                )
                 .order_by(AuditLog.created_at.asc())
             )
         )
@@ -414,8 +431,12 @@ def test_pt_create_contract_forbids_status_override_and_allows_historical_duplic
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    pt_headers, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
-    _, client_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "client")
+    pt_headers, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
+    _, client_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "client"
+    )
 
     with _session_local(meal_plan_recommendations_api_client)() as db:
         _, visible_plan_id, _ = _create_vendor_catalog(db)
@@ -474,8 +495,12 @@ def test_pt_create_and_read_are_blocked_after_link_end(
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    pt_headers, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
-    _, client_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "client")
+    pt_headers, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
+    _, client_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "client"
+    )
     _, ended_client_user_id = _register_user(
         meal_plan_recommendations_api_client, bff_headers, "client"
     )
@@ -518,8 +543,12 @@ def test_client_reads_only_own_historical_recommendations_and_expiry_is_explicit
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    _, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
-    _, second_pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
+    _, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
+    _, second_pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
     client_headers, client_user_id = _register_user(
         meal_plan_recommendations_api_client, bff_headers, "client"
     )
@@ -529,7 +558,9 @@ def test_client_reads_only_own_historical_recommendations_and_expiry_is_explicit
 
     with _session_local(meal_plan_recommendations_api_client)() as db:
         _, visible_plan_id, hidden_plan_id = _create_vendor_catalog(db)
-        active_link = _create_link(db, pt_user_id=pt_user_id, client_user_id=client_user_id)
+        active_link = _create_link(
+            db, pt_user_id=pt_user_id, client_user_id=client_user_id
+        )
         historical_link = _create_link(
             db,
             pt_user_id=second_pt_user_id,
@@ -557,7 +588,9 @@ def test_client_reads_only_own_historical_recommendations_and_expiry_is_explicit
             recommended_at=datetime(2026, 3, 17, 9, 0, tzinfo=UTC),
             rationale="Historical hidden recommendation",
         )
-        expired_hidden_recommendation.expires_at = datetime(2026, 3, 16, 10, 0, tzinfo=UTC)
+        expired_hidden_recommendation.expires_at = datetime(
+            2026, 3, 16, 10, 0, tzinfo=UTC
+        )
         _create_recommendation(
             db,
             pt_user_id=pt_user_id,
@@ -580,10 +613,12 @@ def test_client_reads_only_own_historical_recommendations_and_expiry_is_explicit
         "Visible recommendation",
     ]
     assert payload["items"][0]["meal_plan"]["slug"] == "hidden-pack"
+    assert payload["items"][0]["pt"]["id"] == str(second_pt_user_id)
     assert payload["items"][0]["meal_plan_is_currently_discoverable"] is False
     assert payload["items"][0]["meal_plan_is_currently_available"] is False
     assert payload["items"][0]["is_expired"] is True
     assert payload["items"][1]["meal_plan"]["slug"] == "lean-pack"
+    assert payload["items"][1]["pt"]["id"] == str(pt_user_id)
     assert payload["items"][1]["meal_plan_is_currently_discoverable"] is True
     assert payload["items"][1]["meal_plan_is_currently_available"] is True
     assert payload["items"][1]["is_expired"] is False
@@ -593,18 +628,24 @@ def test_metrics_and_existing_training_vendor_and_admin_flows_remain_stable(
     meal_plan_recommendations_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    pt_headers, pt_user_id = _register_user(meal_plan_recommendations_api_client, bff_headers, "pt")
+    pt_headers, pt_user_id = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "pt"
+    )
     client_headers, client_user_id = _register_user(
         meal_plan_recommendations_api_client, bff_headers, "client"
     )
-    admin_headers, _ = _register_user(meal_plan_recommendations_api_client, bff_headers, "admin")
+    admin_headers, _ = _register_user(
+        meal_plan_recommendations_api_client, bff_headers, "admin"
+    )
 
     with _session_local(meal_plan_recommendations_api_client)() as db:
         _create_vendor_catalog(db)
         _create_link(db, pt_user_id=pt_user_id, client_user_id=client_user_id)
         db.commit()
 
-    metrics_response = meal_plan_recommendations_api_client.get("/metrics", headers=admin_headers)
+    metrics_response = meal_plan_recommendations_api_client.get(
+        "/metrics", headers=admin_headers
+    )
     assert metrics_response.status_code == 200
     assert "mealmetric_http_requests_total" in metrics_response.text
 
@@ -630,7 +671,11 @@ def test_metrics_and_existing_training_vendor_and_admin_flows_remain_stable(
 
     admin_vendor_response = meal_plan_recommendations_api_client.post(
         "/admin/vendors",
-        json={"slug": "new-admin-vendor", "name": "New Admin Vendor", "status": "draft"},
+        json={
+            "slug": "new-admin-vendor",
+            "name": "New Admin Vendor",
+            "status": "draft",
+        },
         headers=admin_headers,
     )
     assert admin_vendor_response.status_code == 201

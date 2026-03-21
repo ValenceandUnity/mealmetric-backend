@@ -102,6 +102,8 @@ def _meal_plan_summary_to_read(view: MealPlanSummaryView) -> MealPlanSummaryRead
     return MealPlanSummaryRead(
         id=view.id,
         vendor_id=view.vendor_id,
+        vendor_name=view.vendor_name,
+        vendor_zip_code=view.vendor_zip_code,
         slug=view.slug,
         name=view.name,
         description=view.description,
@@ -129,6 +131,7 @@ def _vendor_to_read(view: VendorDetailView) -> VendorRead:
         slug=view.slug,
         name=view.name,
         description=view.description,
+        zip_code=view.zip_code,
         status=view.status,
         meal_plans=[_meal_plan_summary_to_read(item) for item in view.meal_plans],
         meal_plan_count=view.meal_plan_count,
@@ -139,6 +142,8 @@ def _meal_plan_to_read(view: MealPlanDetailView) -> MealPlanRead:
     return MealPlanRead(
         id=view.id,
         vendor_id=view.vendor_id,
+        vendor_name=view.vendor_name,
+        vendor_zip_code=view.vendor_zip_code,
         slug=view.slug,
         name=view.name,
         description=view.description,
@@ -182,6 +187,9 @@ def list_meal_plans(
     calorie_max: Annotated[int | None, Query(ge=0)] = None,
     price_min_cents: Annotated[int | None, Query(ge=0)] = None,
     price_max_cents: Annotated[int | None, Query(ge=0)] = None,
+    zip_code: Annotated[str | None, Query(min_length=3, max_length=16)] = None,
+    budget_min_cents: Annotated[int | None, Query(ge=0)] = None,
+    budget_max_cents: Annotated[int | None, Query(ge=0)] = None,
     available_on: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
     pickup_window_id: UUID | None = None,
 ) -> MealPlanListResponse:
@@ -193,6 +201,9 @@ def list_meal_plans(
         calorie_max=calorie_max,
         price_min_cents=price_min_cents,
         price_max_cents=price_max_cents,
+        zip_code=zip_code,
+        budget_min_cents=budget_min_cents,
+        budget_max_cents=budget_max_cents,
         available_on=_parse_iso_date(available_on, "invalid_available_on"),
         pickup_window_id=pickup_window_id,
     )

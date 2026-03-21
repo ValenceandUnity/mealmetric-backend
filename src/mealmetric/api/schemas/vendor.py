@@ -16,6 +16,7 @@ class AdminVendorCreateRequest(BaseModel):
     slug: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    zip_code: str | None = Field(default=None, max_length=16)
     status: VendorStatus = VendorStatus.DRAFT
 
 
@@ -23,6 +24,7 @@ class AdminVendorUpdateRequest(BaseModel):
     slug: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    zip_code: str | None = Field(default=None, max_length=16)
     status: VendorStatus
 
 
@@ -137,6 +139,8 @@ class MealPlanAvailabilityRead(BaseModel):
 class MealPlanSummaryRead(BaseModel):
     id: uuid.UUID
     vendor_id: uuid.UUID
+    vendor_name: str
+    vendor_zip_code: str | None
     slug: str
     name: str
     description: str | None
@@ -150,6 +154,8 @@ class MealPlanSummaryRead(BaseModel):
 class MealPlanRead(BaseModel):
     id: uuid.UUID
     vendor_id: uuid.UUID
+    vendor_name: str
+    vendor_zip_code: str | None
     slug: str
     name: str
     description: str | None
@@ -185,6 +191,7 @@ class VendorRead(BaseModel):
     slug: str
     name: str
     description: str | None
+    zip_code: str | None
     status: VendorStatus
     meal_plans: list[MealPlanSummaryRead]
     meal_plan_count: int
@@ -247,9 +254,39 @@ class AdminVendorRead(BaseModel):
     slug: str
     name: str
     description: str | None
+    zip_code: str | None
     status: VendorStatus
     meal_plans: list[AdminMealPlanRead]
     meal_plan_count: int
+
+
+class VendorPortalIdentityRead(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    description: str | None
+    zip_code: str | None
+    status: VendorStatus
+    meal_plan_count: int
+
+
+class VendorPortalMeResponse(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    vendor_ids: list[uuid.UUID]
+    default_vendor: VendorPortalIdentityRead | None
+    vendors: list[VendorPortalIdentityRead]
+
+
+class VendorMetricsResponse(BaseModel):
+    vendor_id: uuid.UUID
+    vendor_name: str
+    zip_code: str | None
+    total_meal_plans: int
+    published_meal_plans: int
+    draft_meal_plans: int
+    total_availability_entries: int
+    open_pickup_windows: int
 
 
 class AdminVendorMenuItemRead(BaseModel):

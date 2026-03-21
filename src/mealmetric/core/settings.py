@@ -50,6 +50,10 @@ class Settings(BaseSettings):
         non_dev_envs = {"staging", "production"}
         if self.app_env.lower() in non_dev_envs and not self.secret_key:
             raise ValueError("SECRET_KEY is required when APP_ENV is staging or production.")
+        if self.stripe_webhooks_enabled and not self.stripe_webhook_secret:
+            raise ValueError(
+                "STRIPE_WEBHOOK_SECRET is required when STRIPE_WEBHOOKS_ENABLED is true."
+            )
         return self
 
 

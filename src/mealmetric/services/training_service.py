@@ -24,7 +24,8 @@ from mealmetric.models.training import (
     WorkoutLog,
 )
 from mealmetric.models.user import Role
-from mealmetric.repos import audit_log_repo, training_repo
+from mealmetric.repos import audit_log_repo, training_repo, user_repo
+from mealmetric.services.metrics_service import MetricsService, OverviewMetricsView
 
 _AUDIT_LOGGER = logging.getLogger("mealmetric.training.audit")
 
@@ -62,6 +63,21 @@ class ChecklistItemInput:
     details: str | None = None
     position: int = 0
     is_required: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class PTClientProfileView:
+    id: uuid.UUID
+    email: str
+    role: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PTClientDetailView:
+    client: PTClientProfileView
+    current_assignments: tuple[ClientTrainingPackageAssignment, ...]
+    metrics_snapshot: OverviewMetricsView
 
 
 class PtProfileService:
@@ -152,7 +168,9 @@ class PtClientLinkService:
         return training_repo.list_pt_client_links_for_pt(self._session, pt_user_id)
 
     def list_for_client(self, client_user_id: uuid.UUID) -> list[PtClientLink]:
-        return training_repo.list_pt_client_links_for_client(self._session, client_user_id)
+        return training_repo.list_pt_client_links_for_client(
+            self._session, client_user_id
+        )
 
     def update_status(
         self,
@@ -170,6 +188,48 @@ class PtClientLinkService:
             raise TrainingNotFoundError("pt_client_link_not_found")
         link.status = status
         return training_repo.save_pt_client_link(self._session, link)
+
+    def get_client_detail(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        client_user_id: uuid.UUID,
+        as_of_date: date | None = None,
+    ) -> PTClientDetailView:
+        link = training_repo.get_pt_client_link_by_pair(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=client_user_id,
+        )
+        if link is None or link.status != PtClientLinkStatus.ACTIVE:
+            raise TrainingPermissionError("pt_client_link_not_active")
+
+        client_user = user_repo.get_by_id(self._session, client_user_id)
+        if client_user is None:
+            raise TrainingNotFoundError("client_not_found")
+        if client_user.role != Role.CLIENT:
+            raise TrainingValidationError("client_role_required")
+
+        assignments = training_repo.list_assignments_for_pt_client(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=client_user_id,
+        )
+        metrics_snapshot = MetricsService(self._session).get_pt_client_overview(
+            pt_user_id=pt_user_id,
+            client_user_id=client_user_id,
+            as_of_date=as_of_date,
+        )
+        return PTClientDetailView(
+            client=PTClientProfileView(
+                id=client_user.id,
+                email=client_user.email,
+                role=client_user.role.value,
+                created_at=client_user.created_at,
+            ),
+            current_assignments=tuple(assignments),
+            metrics_snapshot=metrics_snapshot,
+        )
 
 
 class PtFolderService:
@@ -299,7 +359,9 @@ class RoutineService:
         routine.estimated_minutes = estimated_minutes
         return training_repo.save_routine(self._session, routine)
 
-    def archive_routine(self, *, pt_user_id: uuid.UUID, routine_id: uuid.UUID) -> Routine:
+    def archive_routine(
+        self, *, pt_user_id: uuid.UUID, routine_id: uuid.UUID
+    ) -> Routine:
         routine = self.get_routine(pt_user_id=pt_user_id, routine_id=routine_id)
         routine.is_archived = True
         return training_repo.save_routine(self._session, routine)
@@ -430,14 +492,17 @@ class TrainingPackageService:
         if any(routine_id not in owned_ids for routine_id in routine_ids):
             raise TrainingPermissionError("routine_not_owned_by_pt")
 
-        training_repo.delete_training_package_routines(self._session, training_package.id)
+        training_repo.delete_training_package_routines(
+            self._session, training_package.id
+        )
 
         sorted_items = sorted(routines, key=lambda item: item.position)
         return training_repo.create_training_package_routines(
             self._session,
             training_package_id=training_package.id,
             routine_items=[
-                (item.routine_id, item.position, item.day_label) for item in sorted_items
+                (item.routine_id, item.position, item.day_label)
+                for item in sorted_items
             ],
         )
 
@@ -451,7 +516,9 @@ class TrainingPackageService:
             pt_user_id=pt_user_id,
             training_package_id=training_package_id,
         )
-        return training_repo.list_training_package_routines(self._session, training_package.id)
+        return training_repo.list_training_package_routines(
+            self._session, training_package.id
+        )
 
 
 class ChecklistService:
@@ -470,7 +537,9 @@ class ChecklistService:
             pt_user_id=pt_user_id,
             training_package_id=training_package_id,
         )
-        training_repo.delete_checklist_items_for_package(self._session, training_package.id)
+        training_repo.delete_checklist_items_for_package(
+            self._session, training_package.id
+        )
         normalized = [
             (item.label, item.details, item.position, item.is_required)
             for item in sorted(items, key=lambda item: item.position)
@@ -490,7 +559,9 @@ class ChecklistService:
         items: Sequence[ChecklistItemInput],
     ) -> list[ChecklistItem]:
         routine_service = RoutineService(self._session)
-        routine = routine_service.get_routine(pt_user_id=pt_user_id, routine_id=routine_id)
+        routine = routine_service.get_routine(
+            pt_user_id=pt_user_id, routine_id=routine_id
+        )
         training_repo.delete_checklist_items_for_routine(self._session, routine.id)
         normalized = [
             (item.label, item.details, item.position, item.is_required)
@@ -514,7 +585,9 @@ class ChecklistService:
             pt_user_id=pt_user_id,
             training_package_id=training_package_id,
         )
-        return training_repo.list_checklist_items_for_package(self._session, training_package.id)
+        return training_repo.list_checklist_items_for_package(
+            self._session, training_package.id
+        )
 
     def list_routine_checklist(
         self,
@@ -523,7 +596,9 @@ class ChecklistService:
         routine_id: uuid.UUID,
     ) -> list[ChecklistItem]:
         routine_service = RoutineService(self._session)
-        routine = routine_service.get_routine(pt_user_id=pt_user_id, routine_id=routine_id)
+        routine = routine_service.get_routine(
+            pt_user_id=pt_user_id, routine_id=routine_id
+        )
         return training_repo.list_checklist_items_for_routine(self._session, routine.id)
 
 
@@ -714,7 +789,9 @@ class ClientTrainingService:
             assignment.training_package_id,
         )
 
-    def list_workout_logs_for_client(self, client_user_id: uuid.UUID) -> list[WorkoutLog]:
+    def list_workout_logs_for_client(
+        self, client_user_id: uuid.UUID
+    ) -> list[WorkoutLog]:
         workout_log_service = WorkoutLogService(self._session)
         return workout_log_service.list_workout_logs_for_client(
             requester_user_id=client_user_id,
@@ -796,7 +873,9 @@ class ClientTrainingService:
                 "client_user_id": str(client_user_id),
                 "pt_user_id": str(pt_user_id),
                 "workout_log_id": str(workout_log.id),
-                "assignment_id": str(assignment_id) if assignment_id is not None else None,
+                "assignment_id": (
+                    str(assignment_id) if assignment_id is not None else None
+                ),
                 "routine_id": str(routine_id) if routine_id is not None else None,
             },
         )
@@ -870,7 +949,9 @@ class WorkoutLogService:
                 "client_user_id": str(client_user_id),
                 "pt_user_id": str(pt_user_id),
                 "workout_log_id": str(workout_log.id),
-                "assignment_id": str(assignment_id) if assignment_id is not None else None,
+                "assignment_id": (
+                    str(assignment_id) if assignment_id is not None else None
+                ),
                 "routine_id": str(routine_id) if routine_id is not None else None,
             },
         )
@@ -883,7 +964,9 @@ class WorkoutLogService:
         client_user_id: uuid.UUID,
     ) -> list[WorkoutLog]:
         if requester_user_id == client_user_id:
-            return training_repo.list_workout_logs_for_client(self._session, client_user_id)
+            return training_repo.list_workout_logs_for_client(
+                self._session, client_user_id
+            )
 
         pt_client_link = training_repo.get_pt_client_link_by_pair(
             self._session,

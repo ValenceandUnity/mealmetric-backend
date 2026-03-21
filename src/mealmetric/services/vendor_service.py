@@ -100,6 +100,8 @@ class MealPlanAvailabilityView:
 class MealPlanSummaryView:
     id: uuid.UUID
     vendor_id: uuid.UUID
+    vendor_name: str
+    vendor_zip_code: str | None
     slug: str
     name: str
     description: str | None
@@ -138,6 +140,7 @@ class VendorDetailView:
     slug: str
     name: str
     description: str | None
+    zip_code: str | None
     status: VendorStatus
     meal_plans: tuple[MealPlanSummaryView, ...]
     meal_plan_count: int
@@ -147,6 +150,8 @@ class VendorDetailView:
 class MealPlanDetailView:
     id: uuid.UUID
     vendor_id: uuid.UUID
+    vendor_name: str
+    vendor_zip_code: str | None
     slug: str
     name: str
     description: str | None
@@ -208,6 +213,7 @@ class VendorService:
             slug=vendor.slug,
             name=vendor.name,
             description=vendor.description,
+            zip_code=vendor.zip_code,
             status=vendor.status,
             meal_plans=meal_plan_list.items,
             meal_plan_count=meal_plan_list.count,
@@ -219,6 +225,7 @@ class VendorService:
         slug: str,
         name: str,
         description: str | None,
+        zip_code: str | None,
         status: VendorStatus,
     ) -> VendorDetailView:
         try:
@@ -227,6 +234,7 @@ class VendorService:
                 slug=slug,
                 name=name,
                 description=description,
+                zip_code=zip_code,
                 status=status,
             )
         except IntegrityError as exc:
@@ -240,12 +248,14 @@ class VendorService:
         slug: str,
         name: str,
         description: str | None,
+        zip_code: str | None,
         status: VendorStatus,
     ) -> VendorDetailView:
         vendor = self._require_vendor(vendor_id=vendor_id)
         vendor.slug = slug
         vendor.name = name
         vendor.description = description
+        vendor.zip_code = vendor_repo.normalize_zip_code(zip_code)
         vendor.status = status
         try:
             vendor_repo.save_vendor(self._session, vendor)
@@ -619,17 +629,23 @@ class VendorService:
         calorie_max: int | None = None,
         price_min_cents: int | None = None,
         price_max_cents: int | None = None,
+        zip_code: str | None = None,
+        budget_min_cents: int | None = None,
+        budget_max_cents: int | None = None,
         available_on: date | None = None,
         pickup_window_id: uuid.UUID | None = None,
     ) -> MealPlanListView:
+        effective_price_min = budget_min_cents if budget_min_cents is not None else price_min_cents
+        effective_price_max = budget_max_cents if budget_max_cents is not None else price_max_cents
         meal_plans = vendor_repo.list_meal_plans(
             self._session,
             vendor_id=vendor_id,
             discoverable_only=discoverable_only,
             calorie_min=calorie_min,
             calorie_max=calorie_max,
-            price_min_cents=price_min_cents,
-            price_max_cents=price_max_cents,
+            price_min_cents=effective_price_min,
+            price_max_cents=effective_price_max,
+            zip_code=zip_code,
             available_on=available_on,
             pickup_window_id=pickup_window_id,
         )
@@ -864,6 +880,8 @@ class VendorService:
         return MealPlanSummaryView(
             id=meal_plan.id,
             vendor_id=meal_plan.vendor_id,
+            vendor_name=meal_plan.vendor.name,
+            vendor_zip_code=meal_plan.vendor.zip_code,
             slug=meal_plan.slug,
             name=meal_plan.name,
             description=meal_plan.description,
@@ -889,6 +907,8 @@ class VendorService:
         return MealPlanDetailView(
             id=summary.id,
             vendor_id=summary.vendor_id,
+            vendor_name=summary.vendor_name,
+            vendor_zip_code=summary.vendor_zip_code,
             slug=summary.slug,
             name=summary.name,
             description=summary.description,

@@ -16,7 +16,7 @@ from mealmetric.db.base import Base
 
 config = context.config
 
-load_dotenv(BASE_DIR / ".env", override=True)
+load_dotenv(BASE_DIR / ".env", override=False)
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL not found. Check backend/.env")

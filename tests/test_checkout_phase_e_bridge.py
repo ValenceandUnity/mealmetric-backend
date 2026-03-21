@@ -6,7 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from mealmetric.models.payment_session import PaymentStatus
-from mealmetric.services.checkout_service import CheckoutPersistenceError, CheckoutService
+from mealmetric.services.checkout_service import (
+    CheckoutPersistenceError,
+    CheckoutService,
+)
 from mealmetric.services.stripe_service import CheckoutSessionResult
 
 
@@ -29,7 +32,9 @@ class _FakeSession:
         self.rollback_count += 1
 
 
-def test_checkout_service_seeds_payment_session(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_checkout_service_seeds_payment_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fake_db = _FakeSession()
     service = CheckoutService(_FakeSettings(), fake_db)  # type: ignore[arg-type]
     captured: dict[str, object] = {}
@@ -51,12 +56,14 @@ def test_checkout_service_seeds_payment_session(monkeypatch: pytest.MonkeyPatch)
         user_id: uuid.UUID | None = None,
         stripe_price_id: str | None = None,
         stripe_payment_intent_id: str | None = None,
+        basket_snapshot: dict[str, object] | None = None,
     ) -> object:
         captured["stripe_checkout_session_id"] = stripe_checkout_session_id
         captured["payment_status"] = payment_status
         captured["user_id"] = user_id
         captured["stripe_price_id"] = stripe_price_id
         captured["stripe_payment_intent_id"] = stripe_payment_intent_id
+        captured["basket_snapshot"] = basket_snapshot
         return object()
 
     monkeypatch.setattr(
@@ -65,7 +72,9 @@ def test_checkout_service_seeds_payment_session(monkeypatch: pytest.MonkeyPatch)
     )
 
     user_id = uuid.uuid4()
-    result = service.create_checkout_session(price_id="price_seed", quantity=1, user_id=user_id)
+    result = service.create_checkout_session(
+        price_id="price_seed", quantity=1, user_id=user_id
+    )
 
     assert result.session_id == "cs_seed_123"
     assert captured == {
@@ -74,12 +83,44 @@ def test_checkout_service_seeds_payment_session(monkeypatch: pytest.MonkeyPatch)
         "user_id": user_id,
         "stripe_price_id": "price_seed",
         "stripe_payment_intent_id": "pi_seed_123",
+        "basket_snapshot": {
+            "currency": "usd",
+            "items": [
+                {
+                    "item_type": "product",
+                    "external_price_id": "price_seed",
+                    "description": None,
+                    "quantity": 1,
+                    "unit_amount_cents": 0,
+                    "subtotal_amount_cents": 0,
+                    "tax_amount_cents": 0,
+                    "total_amount_cents": 0,
+                }
+            ],
+            "line_items": [
+                {
+                    "item_type": "product",
+                    "external_price_id": "price_seed",
+                    "description": None,
+                    "quantity": 1,
+                    "unit_amount_cents": 0,
+                    "subtotal_amount_cents": 0,
+                    "tax_amount_cents": 0,
+                    "total_amount_cents": 0,
+                }
+            ],
+            "subtotal_amount_cents": 0,
+            "tax_amount_cents": 0,
+            "total_amount_cents": 0,
+        },
     }
     assert fake_db.commit_count == 1
     assert fake_db.rollback_count == 0
 
 
-def test_checkout_service_rollback_on_persistence_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_checkout_service_rollback_on_persistence_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fake_db = _FakeSession()
     service = CheckoutService(_FakeSettings(), fake_db)  # type: ignore[arg-type]
 
@@ -100,6 +141,7 @@ def test_checkout_service_rollback_on_persistence_error(monkeypatch: pytest.Monk
         user_id: uuid.UUID | None = None,
         stripe_price_id: str | None = None,
         stripe_payment_intent_id: str | None = None,
+        basket_snapshot: dict[str, object] | None = None,
     ) -> object:
         raise IntegrityError("insert", {}, Exception("dup"))
 
@@ -109,7 +151,9 @@ def test_checkout_service_rollback_on_persistence_error(monkeypatch: pytest.Monk
     )
 
     with pytest.raises(CheckoutPersistenceError):
-        service.create_checkout_session(price_id="price_seed", quantity=1, user_id=uuid.uuid4())
+        service.create_checkout_session(
+            price_id="price_seed", quantity=1, user_id=uuid.uuid4()
+        )
 
     assert fake_db.commit_count == 0
     assert fake_db.rollback_count == 1

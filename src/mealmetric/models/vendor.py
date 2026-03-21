@@ -67,6 +67,7 @@ class Vendor(Base):
     slug: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    zip_code: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     status: Mapped[VendorStatus] = mapped_column(
         Enum(
             VendorStatus,

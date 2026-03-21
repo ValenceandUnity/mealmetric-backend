@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
+from mealmetric.api.schemas.metrics import OverviewMetricsResponse
 from mealmetric.models.training import (
     AssignmentStatus,
     PtClientLinkStatus,
@@ -45,6 +46,20 @@ class PTClientLinkRead(BaseModel):
 class PTClientLinkListResponse(BaseModel):
     items: list[PTClientLinkRead]
     count: int
+
+
+class PTClientProfileRead(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    created_at: datetime
+
+
+class PTClientDetailRead(BaseModel):
+    client: PTClientProfileRead
+    current_assignments: list["ClientAssignmentRead"]
+    assignments_count: int
+    metrics_snapshot: OverviewMetricsResponse
 
 
 class PTClientLinkCreateRequest(BaseModel):

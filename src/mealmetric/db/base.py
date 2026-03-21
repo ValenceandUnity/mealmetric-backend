@@ -8,6 +8,7 @@ class Base(DeclarativeBase):
 # Ensure models are imported so metadata is complete for Alembic.
 import mealmetric.models.audit_log  # noqa: F401, E402
 import mealmetric.models.auth_failure_tracker  # noqa: F401, E402
+import mealmetric.models.bookmark  # noqa: F401, E402
 import mealmetric.models.metrics  # noqa: F401, E402
 import mealmetric.models.order  # noqa: F401, E402
 import mealmetric.models.order_item  # noqa: F401, E402
@@ -21,3 +22,4 @@ import mealmetric.models.training  # noqa: F401, E402
 import mealmetric.models.user  # noqa: F401, E402
 import mealmetric.models.user_role  # noqa: F401, E402
 import mealmetric.models.vendor  # noqa: F401, E402
+import mealmetric.models.vendor_membership  # noqa: F401, E402

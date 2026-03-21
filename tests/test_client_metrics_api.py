@@ -65,7 +65,9 @@ def client_metrics_api_client(
     app.dependency_overrides.pop(get_db, None)
 
 
-def _register_headers(client: TestClient, bff_headers: dict[str, str], role: str) -> dict[str, str]:
+def _register_headers(
+    client: TestClient, bff_headers: dict[str, str], role: str
+) -> dict[str, str]:
     email = f"{role}-{uuid4()}@example.com"
     response = client.post(
         "/auth/register",
@@ -133,7 +135,9 @@ def test_client_metrics_requires_signed_bff_and_auth(
     )
     assert missing_bff.status_code == 401
 
-    missing_jwt = client_metrics_api_client.get("/metrics/overview", headers=bff_headers)
+    missing_jwt = client_metrics_api_client.get(
+        "/metrics/overview", headers=bff_headers
+    )
     assert missing_jwt.status_code == 401
 
 
@@ -150,8 +154,12 @@ def test_client_metrics_self_only_visibility(
     client_metrics_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    client1_headers = _register_headers(client_metrics_api_client, bff_headers, "client")
-    client2_headers = _register_headers(client_metrics_api_client, bff_headers, "client")
+    client1_headers = _register_headers(
+        client_metrics_api_client, bff_headers, "client"
+    )
+    client2_headers = _register_headers(
+        client_metrics_api_client, bff_headers, "client"
+    )
 
     _seed_client_week_records(
         client_metrics_api_client, client1_headers, calories=2200, expenditure=1800
@@ -203,6 +211,7 @@ def test_client_metrics_response_contract_and_freshness(
     weekly_payload = weekly.json()
     assert weekly_payload["week_start_day"] == 1
     assert weekly_payload["business_timezone"] == "America/New_York"
+    assert weekly_payload["as_of_date"] == "2026-03-22"
     assert weekly_payload["weekly_target_deficit_calories"] == 3500
     assert weekly_payload["freshness"]["source"] == "raw"
     assert weekly_payload["freshness"]["version"] is None
@@ -232,6 +241,9 @@ def test_client_metrics_empty_state_and_history_validation(
     assert history.status_code == 200
     history_payload = history.json()
     assert history_payload["count"] == 3
+    assert history_payload["week_start_date"] == "2026-03-16"
+    assert history_payload["total_intake_calories"] == 0
+    assert history_payload["freshness"]["source"] == "empty"
 
     too_low = client_metrics_api_client.get(
         "/metrics/history",

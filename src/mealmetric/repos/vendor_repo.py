@@ -34,6 +34,16 @@ _DISCOVERABLE_AVAILABILITY_STATUSES = (
 )
 
 
+def normalize_zip_code(zip_code: str | None) -> str | None:
+    if zip_code is None:
+        return None
+    digits = "".join(character for character in zip_code if character.isdigit())
+    if len(digits) in {5, 9}:
+        return digits
+    stripped = zip_code.strip()
+    return stripped or None
+
+
 def _meal_plan_totals_subquery(*, discoverable_only: bool) -> Subquery:
     stmt = (
         select(
@@ -123,9 +133,16 @@ def create_vendor(
     slug: str,
     name: str,
     description: str | None,
+    zip_code: str | None,
     status: VendorStatus,
 ) -> Vendor:
-    vendor = Vendor(slug=slug, name=name, description=description, status=status)
+    vendor = Vendor(
+        slug=slug,
+        name=name,
+        description=description,
+        zip_code=normalize_zip_code(zip_code),
+        status=status,
+    )
     session.add(vendor)
     session.flush()
     return vendor
@@ -403,6 +420,7 @@ def list_meal_plans(
     calorie_max: int | None = None,
     price_min_cents: int | None = None,
     price_max_cents: int | None = None,
+    zip_code: str | None = None,
     available_on: date | None = None,
     pickup_window_id: uuid.UUID | None = None,
 ) -> list[MealPlan]:
@@ -415,6 +433,9 @@ def list_meal_plans(
 
     if vendor_id is not None:
         stmt = stmt.where(MealPlan.vendor_id == vendor_id)
+    normalized_zip = normalize_zip_code(zip_code)
+    if normalized_zip is not None:
+        stmt = stmt.where(Vendor.zip_code == normalized_zip)
     if discoverable_only:
         stmt = _apply_meal_plan_discoverable_filters(
             stmt,

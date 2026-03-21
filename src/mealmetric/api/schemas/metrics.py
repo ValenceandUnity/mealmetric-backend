@@ -16,6 +16,7 @@ class MetricsFreshnessResponse(BaseModel):
 
 class WeeklyMetricsResponse(BaseModel):
     client_user_id: uuid.UUID
+    as_of_date: date
     week_start_date: date
     week_end_date: date
     business_timezone: str
@@ -25,6 +26,8 @@ class WeeklyMetricsResponse(BaseModel):
     net_calorie_balance: int
     weekly_target_deficit_calories: int | None
     deficit_progress_percent: Decimal | None
+    current_intake_ceiling_calories: int | None
+    current_expenditure_floor_calories: int | None
     has_data: bool
     freshness: MetricsFreshnessResponse
 
@@ -50,8 +53,19 @@ class OverviewMetricsResponse(BaseModel):
 class MetricsHistoryResponse(BaseModel):
     client_user_id: uuid.UUID
     as_of_date: date
+    week_start_date: date | None
+    week_end_date: date | None
     business_timezone: str
     week_start_day: int
+    total_intake_calories: int
+    total_expenditure_calories: int
+    net_calorie_balance: int
+    weekly_target_deficit_calories: int | None
+    deficit_progress_percent: Decimal | None
+    current_intake_ceiling_calories: int | None
+    current_expenditure_floor_calories: int | None
+    has_data: bool
+    freshness: MetricsFreshnessResponse
     weeks: list[WeeklyMetricsResponse]
     count: int
 

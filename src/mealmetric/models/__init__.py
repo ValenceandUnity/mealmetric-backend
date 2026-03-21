@@ -2,6 +2,7 @@
 
 from mealmetric.models.audit_log import AuditEventAction, AuditEventCategory, AuditLog
 from mealmetric.models.auth_failure_tracker import AuthFailureTracker
+from mealmetric.models.bookmark import BookmarkFolder, BookmarkItem
 from mealmetric.models.metrics import (
     ActivityExpenditureRecord,
     CalorieIntakeRecord,
@@ -58,6 +59,7 @@ from mealmetric.models.vendor import (
     VendorPickupWindowStatus,
     VendorStatus,
 )
+from mealmetric.models.vendor_membership import VendorUserMembership
 
 __all__ = [
     "ActivityExpenditureRecord",
@@ -66,6 +68,8 @@ __all__ = [
     "AuditEventCategory",
     "AuditLog",
     "AuthFailureTracker",
+    "BookmarkFolder",
+    "BookmarkItem",
     "CalorieIntakeRecord",
     "ChecklistItem",
     "ClientMetricSnapshot",
@@ -112,6 +116,7 @@ __all__ = [
     "VendorMenuItemStatus",
     "VendorPickupWindow",
     "VendorPickupWindowStatus",
+    "VendorUserMembership",
     "VendorStatus",
     "WebhookProcessingStatus",
     "WeeklyMetricRollup",

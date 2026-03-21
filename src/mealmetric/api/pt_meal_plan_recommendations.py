@@ -5,12 +5,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from mealmetric.api.deps.auth import get_current_user, require_roles, require_trusted_caller
+from mealmetric.api.deps.auth import (
+    get_current_user,
+    require_roles,
+    require_trusted_caller,
+)
 from mealmetric.api.schemas.recommendation import (
     MealPlanRecommendationCreateRequest,
     MealPlanRecommendationListResponse,
     MealPlanRecommendationRead,
     RecommendationMealPlanSummaryRead,
+    RecommendationPtAttributionRead,
 )
 from mealmetric.db.session import get_db
 from mealmetric.models.user import Role, User
@@ -21,6 +26,7 @@ from mealmetric.services.recommendation_service import (
     RecommendationMealPlanSummaryView,
     RecommendationNotFoundError,
     RecommendationPermissionError,
+    RecommendationPtAttributionView,
     RecommendationValidationError,
 )
 
@@ -54,7 +60,9 @@ def _translate_service_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         )
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error")
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error"
+    )
 
 
 def _run_mutation[T](db: Session, operation: Callable[[], T]) -> T:
@@ -89,7 +97,19 @@ def _meal_plan_summary_to_read(
     )
 
 
-def _recommendation_to_read(view: MealPlanRecommendationView) -> MealPlanRecommendationRead:
+def _pt_attribution_to_read(
+    view: RecommendationPtAttributionView,
+) -> RecommendationPtAttributionRead:
+    return RecommendationPtAttributionRead(
+        id=view.id,
+        email=view.email,
+        display_name=view.display_name,
+    )
+
+
+def _recommendation_to_read(
+    view: MealPlanRecommendationView,
+) -> MealPlanRecommendationRead:
     return MealPlanRecommendationRead(
         id=view.id,
         pt_user_id=view.pt_user_id,
@@ -102,6 +122,7 @@ def _recommendation_to_read(view: MealPlanRecommendationView) -> MealPlanRecomme
         is_expired=view.is_expired,
         created_at=view.created_at,
         updated_at=view.updated_at,
+        pt=_pt_attribution_to_read(view.pt),
         meal_plan=_meal_plan_summary_to_read(view.meal_plan),
         meal_plan_is_currently_discoverable=view.meal_plan_is_currently_discoverable,
         meal_plan_is_currently_available=view.meal_plan_is_currently_available,

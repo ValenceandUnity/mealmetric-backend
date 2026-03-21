@@ -1,11 +1,20 @@
 from collections.abc import Callable
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from mealmetric.api.deps.auth import get_current_user, require_roles, require_trusted_caller
+from mealmetric.api.deps.auth import (
+    get_current_user,
+    require_roles,
+    require_trusted_caller,
+)
+from mealmetric.api.schemas.metrics import (
+    MetricsFreshnessResponse,
+    OverviewMetricsResponse,
+)
 from mealmetric.api.schemas.training import (
     ChecklistItemListResponse,
     ChecklistItemRead,
@@ -17,10 +26,12 @@ from mealmetric.api.schemas.training import (
     PackageRoutineListResponse,
     PackageRoutineRead,
     PackageRoutineReplaceRequest,
+    PTClientDetailRead,
     PTClientLinkCreateRequest,
     PTClientLinkListResponse,
     PTClientLinkRead,
     PTClientLinkStatusUpdateRequest,
+    PTClientProfileRead,
     PTFolderCreateRequest,
     PTFolderListResponse,
     PTFolderRead,
@@ -48,11 +59,13 @@ from mealmetric.models.training import (
     TrainingPackageRoutine,
 )
 from mealmetric.models.user import Role, User
+from mealmetric.services.metrics_service import MetricsFreshness, OverviewMetricsView
 from mealmetric.services.training_service import (
     AssignmentService,
     ChecklistItemInput,
     ChecklistService,
     PackageRoutineInput,
+    PTClientDetailView,
     PtClientLinkService,
     PtFolderService,
     PtProfileService,
@@ -90,8 +103,12 @@ def _translate_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, TrainingPermissionError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     if isinstance(exc, TrainingValidationError):
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error")
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error"
+    )
 
 
 def _run_mutation[T](db: Session, operation: Callable[[], T]) -> T:
@@ -204,7 +221,9 @@ def _checklist_item_to_read(item: ChecklistItem) -> ChecklistItemRead:
     )
 
 
-def _assignment_to_read(assignment: ClientTrainingPackageAssignment) -> ClientAssignmentRead:
+def _assignment_to_read(
+    assignment: ClientTrainingPackageAssignment,
+) -> ClientAssignmentRead:
     return ClientAssignmentRead(
         id=assignment.id,
         training_package_id=assignment.training_package_id,
@@ -220,13 +239,62 @@ def _assignment_to_read(assignment: ClientTrainingPackageAssignment) -> ClientAs
     )
 
 
+def _freshness_to_response(freshness: MetricsFreshness) -> MetricsFreshnessResponse:
+    return MetricsFreshnessResponse(
+        source=freshness.source,
+        computed_at=freshness.computed_at,
+        snapshot_generated_at=freshness.snapshot_generated_at,
+        source_window_start=freshness.source_window_start,
+        source_window_end=freshness.source_window_end,
+        version=freshness.version,
+    )
+
+
+def _overview_to_response(view: OverviewMetricsView) -> OverviewMetricsResponse:
+    return OverviewMetricsResponse(
+        client_user_id=view.client_user_id,
+        as_of_date=view.as_of_date,
+        week_start_date=view.week_start_date,
+        week_end_date=view.week_end_date,
+        business_timezone=view.business_timezone,
+        week_start_day=view.week_start_day,
+        total_intake_calories=view.total_intake_calories,
+        total_expenditure_calories=view.total_expenditure_calories,
+        net_calorie_balance=view.net_calorie_balance,
+        weekly_target_deficit_calories=view.weekly_target_deficit_calories,
+        deficit_progress_percent=view.deficit_progress_percent,
+        current_intake_ceiling_calories=view.current_intake_ceiling_calories,
+        current_expenditure_floor_calories=view.current_expenditure_floor_calories,
+        has_data=view.has_data,
+        freshness=_freshness_to_response(view.freshness),
+    )
+
+
+def _client_detail_to_read(view: PTClientDetailView) -> PTClientDetailRead:
+    return PTClientDetailRead(
+        client=PTClientProfileRead(
+            id=view.client.id,
+            email=view.client.email,
+            role=view.client.role,
+            created_at=view.client.created_at,
+        ),
+        current_assignments=[
+            _assignment_to_read(item) for item in view.current_assignments
+        ],
+        assignments_count=len(view.current_assignments),
+        metrics_snapshot=_overview_to_response(view.metrics_snapshot),
+    )
+
+
 @router.get("/profile/me", response_model=PTProfileRead)
 def get_pt_profile_me(db: DBSessionDep, current_user: CurrentUserDep) -> PTProfileRead:
     session = _require_db(db)
     service = PtProfileService(session)
     profile = service.get_by_user_id(current_user.id)
     if profile is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pt_profile_not_found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="pt_profile_not_found"
+        )
     return _profile_to_read(profile)
 
 
@@ -254,7 +322,9 @@ def update_pt_profile_me(
 
 
 @router.get("/clients", response_model=PTClientLinkListResponse)
-def list_pt_clients(db: DBSessionDep, current_user: CurrentUserDep) -> PTClientLinkListResponse:
+def list_pt_clients(
+    db: DBSessionDep, current_user: CurrentUserDep
+) -> PTClientLinkListResponse:
     session = _require_db(db)
     service = PtClientLinkService(session)
     links = service.list_for_pt(current_user.id)
@@ -316,7 +386,9 @@ def update_pt_client_link_status(
 
 
 @router.get("/folders", response_model=PTFolderListResponse)
-def list_pt_folders(db: DBSessionDep, current_user: CurrentUserDep) -> PTFolderListResponse:
+def list_pt_folders(
+    db: DBSessionDep, current_user: CurrentUserDep
+) -> PTFolderListResponse:
     session = _require_db(db)
     service = PtFolderService(session)
     folders = service.list_folders(current_user.id)
@@ -324,7 +396,9 @@ def list_pt_folders(db: DBSessionDep, current_user: CurrentUserDep) -> PTFolderL
     return PTFolderListResponse(items=items, count=len(items))
 
 
-@router.post("/folders", response_model=PTFolderRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/folders", response_model=PTFolderRead, status_code=status.HTTP_201_CREATED
+)
 def create_pt_folder(
     payload: PTFolderCreateRequest,
     db: DBSessionDep,
@@ -369,7 +443,9 @@ def update_pt_folder(
 
 
 @router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_pt_folder(folder_id: UUID, db: DBSessionDep, current_user: CurrentUserDep) -> Response:
+def delete_pt_folder(
+    folder_id: UUID, db: DBSessionDep, current_user: CurrentUserDep
+) -> Response:
     session = _require_db(db)
     service = PtFolderService(session)
 
@@ -382,7 +458,9 @@ def delete_pt_folder(folder_id: UUID, db: DBSessionDep, current_user: CurrentUse
 
 
 @router.get("/routines", response_model=RoutineListResponse)
-def list_pt_routines(db: DBSessionDep, current_user: CurrentUserDep) -> RoutineListResponse:
+def list_pt_routines(
+    db: DBSessionDep, current_user: CurrentUserDep
+) -> RoutineListResponse:
     session = _require_db(db)
     service = RoutineService(session)
     routines = service.list_routines(current_user.id)
@@ -391,17 +469,25 @@ def list_pt_routines(db: DBSessionDep, current_user: CurrentUserDep) -> RoutineL
 
 
 @router.get("/routines/{routine_id}", response_model=RoutineRead)
-def get_pt_routine(routine_id: UUID, db: DBSessionDep, current_user: CurrentUserDep) -> RoutineRead:
+def get_pt_routine(
+    routine_id: UUID, db: DBSessionDep, current_user: CurrentUserDep
+) -> RoutineRead:
     session = _require_db(db)
     service = RoutineService(session)
     try:
         routine = service.get_routine(pt_user_id=current_user.id, routine_id=routine_id)
-    except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
         raise _translate_service_error(exc) from exc
     return _routine_to_read(routine)
 
 
-@router.post("/routines", response_model=RoutineRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/routines", response_model=RoutineRead, status_code=status.HTTP_201_CREATED
+)
 def create_pt_routine(
     payload: RoutineCreateRequest,
     db: DBSessionDep,
@@ -459,18 +545,24 @@ def archive_pt_routine(
     service = RoutineService(session)
 
     def _operation() -> Routine:
-        return service.archive_routine(pt_user_id=current_user.id, routine_id=routine_id)
+        return service.archive_routine(
+            pt_user_id=current_user.id, routine_id=routine_id
+        )
 
     archived = _run_mutation(session, _operation)
     return _routine_to_read(archived)
 
 
 @router.get("/packages", response_model=TrainingPackageListResponse)
-def list_pt_packages(db: DBSessionDep, current_user: CurrentUserDep) -> TrainingPackageListResponse:
+def list_pt_packages(
+    db: DBSessionDep, current_user: CurrentUserDep
+) -> TrainingPackageListResponse:
     session = _require_db(db)
     service = TrainingPackageService(session)
     packages = service.list_training_packages(current_user.id)
-    items = [_training_package_to_read(training_package) for training_package in packages]
+    items = [
+        _training_package_to_read(training_package) for training_package in packages
+    ]
     return TrainingPackageListResponse(items=items, count=len(items))
 
 
@@ -485,12 +577,18 @@ def get_pt_package(
             pt_user_id=current_user.id,
             training_package_id=package_id,
         )
-    except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
         raise _translate_service_error(exc) from exc
     return _training_package_to_read(training_package)
 
 
-@router.post("/packages", response_model=TrainingPackageRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/packages", response_model=TrainingPackageRead, status_code=status.HTTP_201_CREATED
+)
 def create_pt_package(
     payload: TrainingPackageCreateRequest,
     db: DBSessionDep,
@@ -559,7 +657,9 @@ def archive_pt_package(
     return _training_package_to_read(archived)
 
 
-@router.get("/packages/{package_id}/routines", response_model=PackageRoutineListResponse)
+@router.get(
+    "/packages/{package_id}/routines", response_model=PackageRoutineListResponse
+)
 def list_package_routines(
     package_id: UUID,
     db: DBSessionDep,
@@ -572,13 +672,19 @@ def list_package_routines(
             pt_user_id=current_user.id,
             training_package_id=package_id,
         )
-    except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
         raise _translate_service_error(exc) from exc
     items = [_package_routine_to_read(item) for item in routines]
     return PackageRoutineListResponse(items=items, count=len(items))
 
 
-@router.put("/packages/{package_id}/routines", response_model=PackageRoutineListResponse)
+@router.put(
+    "/packages/{package_id}/routines", response_model=PackageRoutineListResponse
+)
 def replace_package_routines(
     package_id: UUID,
     payload: PackageRoutineReplaceRequest,
@@ -607,7 +713,9 @@ def replace_package_routines(
     return PackageRoutineListResponse(items=items, count=len(items))
 
 
-@router.get("/packages/{package_id}/checklist", response_model=ChecklistItemListResponse)
+@router.get(
+    "/packages/{package_id}/checklist", response_model=ChecklistItemListResponse
+)
 def list_package_checklist(
     package_id: UUID,
     db: DBSessionDep,
@@ -620,13 +728,19 @@ def list_package_checklist(
             pt_user_id=current_user.id,
             training_package_id=package_id,
         )
-    except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
         raise _translate_service_error(exc) from exc
     items = [_checklist_item_to_read(item) for item in checklist_items]
     return ChecklistItemListResponse(items=items, count=len(items))
 
 
-@router.put("/packages/{package_id}/checklist", response_model=ChecklistItemListResponse)
+@router.put(
+    "/packages/{package_id}/checklist", response_model=ChecklistItemListResponse
+)
 def replace_package_checklist(
     package_id: UUID,
     payload: ChecklistReplaceRequest,
@@ -656,7 +770,9 @@ def replace_package_checklist(
     return ChecklistItemListResponse(items=items, count=len(items))
 
 
-@router.get("/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse)
+@router.get(
+    "/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse
+)
 def list_routine_checklist(
     routine_id: UUID,
     db: DBSessionDep,
@@ -669,13 +785,19 @@ def list_routine_checklist(
             pt_user_id=current_user.id,
             routine_id=routine_id,
         )
-    except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
         raise _translate_service_error(exc) from exc
     items = [_checklist_item_to_read(item) for item in checklist_items]
     return ChecklistItemListResponse(items=items, count=len(items))
 
 
-@router.put("/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse)
+@router.put(
+    "/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse
+)
 def replace_routine_checklist(
     routine_id: UUID,
     payload: ChecklistReplaceRequest,
@@ -703,6 +825,30 @@ def replace_routine_checklist(
     checklist_items = _run_mutation(session, _operation)
     items = [_checklist_item_to_read(item) for item in checklist_items]
     return ChecklistItemListResponse(items=items, count=len(items))
+
+
+@router.get("/clients/{client_user_id}", response_model=PTClientDetailRead)
+def get_pt_client_detail(
+    client_user_id: UUID,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+    as_of_date: date | None = None,
+) -> PTClientDetailRead:
+    session = _require_db(db)
+    service = PtClientLinkService(session)
+    try:
+        view = service.get_client_detail(
+            pt_user_id=current_user.id,
+            client_user_id=client_user_id,
+            as_of_date=as_of_date,
+        )
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
+        raise _translate_service_error(exc) from exc
+    return _client_detail_to_read(view)
 
 
 @router.get(

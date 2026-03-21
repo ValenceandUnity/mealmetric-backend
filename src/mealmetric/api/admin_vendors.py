@@ -150,6 +150,7 @@ def _vendor_to_read(item: VendorDetailView) -> AdminVendorRead:
         slug=item.slug,
         name=item.name,
         description=item.description,
+        zip_code=item.zip_code,
         status=item.status,
         meal_plans=[_meal_plan_summary_to_read(plan) for plan in item.meal_plans],
         meal_plan_count=item.meal_plan_count,
@@ -200,6 +201,7 @@ def create_vendor(payload: AdminVendorCreateRequest, db: DBSessionDep) -> AdminV
             slug=payload.slug,
             name=payload.name,
             description=payload.description,
+            zip_code=payload.zip_code,
             status=payload.status,
         ),
     )
@@ -221,6 +223,7 @@ def update_vendor(
             slug=payload.slug,
             name=payload.name,
             description=payload.description,
+            zip_code=payload.zip_code,
             status=payload.status,
         ),
     )

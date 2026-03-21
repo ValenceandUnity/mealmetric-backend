@@ -29,6 +29,12 @@ class RecommendationMealPlanSummaryRead(BaseModel):
     availability_count: int
 
 
+class RecommendationPtAttributionRead(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+
+
 class MealPlanRecommendationRead(BaseModel):
     id: uuid.UUID
     pt_user_id: uuid.UUID
@@ -41,6 +47,7 @@ class MealPlanRecommendationRead(BaseModel):
     is_expired: bool
     created_at: datetime
     updated_at: datetime
+    pt: RecommendationPtAttributionRead
     meal_plan: RecommendationMealPlanSummaryRead
     meal_plan_is_currently_discoverable: bool
     meal_plan_is_currently_available: bool
