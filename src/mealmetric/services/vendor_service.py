@@ -1,5 +1,6 @@
 import uuid
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -624,12 +625,14 @@ class VendorService:
         self,
         *,
         vendor_id: uuid.UUID | None = None,
+        q: str | None = None,
         discoverable_only: bool = True,
         calorie_min: int | None = None,
         calorie_max: int | None = None,
         price_min_cents: int | None = None,
         price_max_cents: int | None = None,
         zip_code: str | None = None,
+        zip_codes: Sequence[str] | None = None,
         budget_min_cents: int | None = None,
         budget_max_cents: int | None = None,
         available_on: date | None = None,
@@ -640,12 +643,14 @@ class VendorService:
         meal_plans = vendor_repo.list_meal_plans(
             self._session,
             vendor_id=vendor_id,
+            q=q,
             discoverable_only=discoverable_only,
             calorie_min=calorie_min,
             calorie_max=calorie_max,
             price_min_cents=effective_price_min,
             price_max_cents=effective_price_max,
             zip_code=zip_code,
+            zip_codes=zip_codes,
             available_on=available_on,
             pickup_window_id=pickup_window_id,
         )

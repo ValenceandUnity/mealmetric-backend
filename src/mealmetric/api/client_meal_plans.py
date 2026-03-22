@@ -19,6 +19,7 @@ from mealmetric.api.schemas.vendor import (
 )
 from mealmetric.db.session import get_db
 from mealmetric.models.user import Role
+from mealmetric.repos import vendor_repo
 from mealmetric.services.vendor_service import (
     MealPlanAvailabilityView,
     MealPlanDetailView,
@@ -67,6 +68,29 @@ def _parse_iso_date(raw: str | None, detail: str) -> date | None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=detail,
+        ) from exc
+
+
+def _normalize_optional_query(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    normalized = raw.strip()
+    return normalized or None
+
+
+def _normalize_zip_filters(
+    zip_code: str | None,
+    zip_codes: list[str] | None,
+) -> tuple[str | None, tuple[str, ...] | None]:
+    try:
+        normalized_zip_codes = vendor_repo.normalize_zip_filters(zip_codes)
+        if zip_codes is not None:
+            return None, normalized_zip_codes or None
+        return vendor_repo.normalize_zip_filter(zip_code), None
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
         ) from exc
 
 
@@ -183,11 +207,13 @@ def get_vendor_detail(vendor_id: UUID, db: DBSessionDep) -> VendorRead:
 def list_meal_plans(
     db: DBSessionDep,
     vendor_id: UUID | None = None,
+    q: str | None = None,
     calorie_min: Annotated[int | None, Query(ge=0)] = None,
     calorie_max: Annotated[int | None, Query(ge=0)] = None,
     price_min_cents: Annotated[int | None, Query(ge=0)] = None,
     price_max_cents: Annotated[int | None, Query(ge=0)] = None,
     zip_code: Annotated[str | None, Query(min_length=3, max_length=16)] = None,
+    zip_codes: Annotated[list[str] | None, Query()] = None,
     budget_min_cents: Annotated[int | None, Query(ge=0)] = None,
     budget_max_cents: Annotated[int | None, Query(ge=0)] = None,
     available_on: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
@@ -195,13 +221,16 @@ def list_meal_plans(
 ) -> MealPlanListResponse:
     session = _require_db(db)
     service = VendorService(session)
+    normalized_zip_code, normalized_zip_codes = _normalize_zip_filters(zip_code, zip_codes)
     view = service.list_meal_plans(
         vendor_id=vendor_id,
+        q=_normalize_optional_query(q),
         calorie_min=calorie_min,
         calorie_max=calorie_max,
         price_min_cents=price_min_cents,
         price_max_cents=price_max_cents,
-        zip_code=zip_code,
+        zip_code=normalized_zip_code,
+        zip_codes=normalized_zip_codes,
         budget_min_cents=budget_min_cents,
         budget_max_cents=budget_max_cents,
         available_on=_parse_iso_date(available_on, "invalid_available_on"),

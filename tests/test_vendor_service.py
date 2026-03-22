@@ -479,6 +479,102 @@ def test_service_list_meal_plans_empty_and_filtered_states_are_stable() -> None:
         assert filtered.items[0].total_calories == 450
 
 
+def test_service_list_meal_plans_supports_optional_name_and_vendor_search() -> None:
+    session_local = _build_sqlite_sessionmaker()
+
+    with session_local() as db:
+        alpha_vendor = _create_vendor(db, slug="alpha", name="Alpha Kitchen")
+        beta_vendor = _create_vendor(db, slug="beta", name="Beta Meals")
+
+        alpha_item = _create_menu_item(
+            db,
+            vendor_id=alpha_vendor.id,
+            slug="alpha-item",
+            price_cents=1100,
+            calories=500,
+        )
+        beta_item = _create_menu_item(
+            db,
+            vendor_id=beta_vendor.id,
+            slug="beta-item",
+            price_cents=1200,
+            calories=550,
+        )
+
+        alpha_plan = _create_meal_plan(
+            db,
+            vendor_id=alpha_vendor.id,
+            slug="lean-pack",
+            name="Lean Pack",
+        )
+        beta_plan = _create_meal_plan(
+            db,
+            vendor_id=beta_vendor.id,
+            slug="power-pack",
+            name="Power Pack",
+        )
+
+        _create_meal_plan_item(
+            db,
+            vendor_id=alpha_vendor.id,
+            meal_plan_id=alpha_plan.id,
+            vendor_menu_item_id=alpha_item.id,
+            position=0,
+        )
+        _create_meal_plan_item(
+            db,
+            vendor_id=beta_vendor.id,
+            meal_plan_id=beta_plan.id,
+            vendor_menu_item_id=beta_item.id,
+            position=0,
+        )
+
+        alpha_window = _create_pickup_window(
+            db,
+            vendor_id=alpha_vendor.id,
+            start_at=datetime(2026, 3, 28, 17, 0, tzinfo=UTC),
+            end_at=datetime(2026, 3, 28, 18, 0, tzinfo=UTC),
+        )
+        beta_window = _create_pickup_window(
+            db,
+            vendor_id=beta_vendor.id,
+            start_at=datetime(2026, 3, 29, 17, 0, tzinfo=UTC),
+            end_at=datetime(2026, 3, 29, 18, 0, tzinfo=UTC),
+        )
+
+        _create_availability(
+            db,
+            vendor_id=alpha_vendor.id,
+            meal_plan_id=alpha_plan.id,
+            pickup_window_id=alpha_window.id,
+            inventory_count=3,
+        )
+        _create_availability(
+            db,
+            vendor_id=beta_vendor.id,
+            meal_plan_id=beta_plan.id,
+            pickup_window_id=beta_window.id,
+            inventory_count=4,
+        )
+        db.commit()
+
+        service = VendorService(db)
+
+        baseline = service.list_meal_plans()
+        assert [item.slug for item in baseline.items] == ["lean-pack", "power-pack"]
+
+        by_name = service.list_meal_plans(q="LEAN")
+        assert by_name.count == 1
+        assert by_name.items[0].slug == "lean-pack"
+
+        by_vendor = service.list_meal_plans(q="beta meals")
+        assert by_vendor.count == 1
+        assert by_vendor.items[0].slug == "power-pack"
+
+        blank = service.list_meal_plans(q="   ")
+        assert [item.slug for item in blank.items] == ["lean-pack", "power-pack"]
+
+
 def test_internal_non_discoverable_read_path_is_explicit_and_scoped() -> None:
     session_local = _build_sqlite_sessionmaker()
 

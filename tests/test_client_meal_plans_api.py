@@ -89,9 +89,10 @@ def _create_vendor(
     *,
     slug: str,
     name: str,
+    zip_code: str | None = None,
     status: VendorStatus = VendorStatus.ACTIVE,
 ) -> Vendor:
-    vendor = Vendor(slug=slug, name=name, status=status)
+    vendor = Vendor(slug=slug, name=name, zip_code=zip_code, status=status)
     db.add(vendor)
     db.flush()
     return vendor
@@ -201,12 +202,13 @@ def _seed_catalog(client: TestClient) -> tuple[UUID, UUID, UUID, UUID]:
     session_local = cast(sessionmaker[Session], app.state.testing_session_local)
 
     with session_local() as db:
-        alpha_vendor = _create_vendor(db, slug="alpha", name="Alpha Vendor")
-        beta_vendor = _create_vendor(db, slug="beta", name="Beta Vendor")
+        alpha_vendor = _create_vendor(db, slug="alpha", name="Alpha Vendor", zip_code="10001")
+        beta_vendor = _create_vendor(db, slug="beta", name="Beta Vendor", zip_code="10002")
         hidden_vendor = _create_vendor(
             db,
             slug="hidden",
             name="Hidden Vendor",
+            zip_code="10003",
             status=VendorStatus.INACTIVE,
         )
 
@@ -527,3 +529,111 @@ def test_client_discovery_invalid_date_and_regression_routes_remain_stable(
     )
     assert client_training_response.status_code == 200
     assert client_training_response.json() == {"items": [], "count": 0}
+
+
+def test_client_discovery_meal_plan_search_is_optional_and_case_insensitive(
+    client_meal_plans_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    client_headers = _register_headers(client_meal_plans_api_client, bff_headers, "client")
+
+    _seed_catalog(client_meal_plans_api_client)
+
+    baseline = client_meal_plans_api_client.get("/meal-plans", headers=client_headers)
+    assert baseline.status_code == 200
+    assert [item["slug"] for item in baseline.json()["items"]] == ["bulk-pack", "lean-pack"]
+
+    by_name = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"q": "LEAN"},
+        headers=client_headers,
+    )
+    assert by_name.status_code == 200
+    assert by_name.json()["count"] == 1
+    assert by_name.json()["items"][0]["slug"] == "lean-pack"
+
+    by_vendor = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"q": "beta vendor"},
+        headers=client_headers,
+    )
+    assert by_vendor.status_code == 200
+    assert by_vendor.json()["count"] == 1
+    assert by_vendor.json()["items"][0]["slug"] == "bulk-pack"
+
+    blank = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"q": "   "},
+        headers=client_headers,
+    )
+    assert blank.status_code == 200
+    assert blank.json() == baseline.json()
+
+
+def test_client_discovery_zip_filters_support_single_and_multiple_zip_codes(
+    client_meal_plans_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    client_headers = _register_headers(client_meal_plans_api_client, bff_headers, "client")
+
+    _seed_catalog(client_meal_plans_api_client)
+
+    legacy_single = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"zip_code": "10001"},
+        headers=client_headers,
+    )
+    assert legacy_single.status_code == 200
+    assert legacy_single.json()["count"] == 1
+    assert [item["slug"] for item in legacy_single.json()["items"]] == ["lean-pack"]
+
+    multi_csv = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"zip_codes": "10002, 10001,10002"},
+        headers=client_headers,
+    )
+    assert multi_csv.status_code == 200
+    assert multi_csv.json()["count"] == 2
+    assert [item["slug"] for item in multi_csv.json()["items"]] == ["bulk-pack", "lean-pack"]
+
+    multi_repeated = client_meal_plans_api_client.get(
+        "/meal-plans?zip_codes=10001&zip_codes=10002",
+        headers=client_headers,
+    )
+    assert multi_repeated.status_code == 200
+    assert multi_repeated.json()["count"] == 2
+    assert [item["slug"] for item in multi_repeated.json()["items"]] == ["bulk-pack", "lean-pack"]
+
+    zip_codes_precedence = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"zip_code": "10001", "zip_codes": "10002"},
+        headers=client_headers,
+    )
+    assert zip_codes_precedence.status_code == 200
+    assert zip_codes_precedence.json()["count"] == 1
+    assert [item["slug"] for item in zip_codes_precedence.json()["items"]] == ["bulk-pack"]
+
+
+def test_client_discovery_zip_filters_reject_invalid_zip_codes(
+    client_meal_plans_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    client_headers = _register_headers(client_meal_plans_api_client, bff_headers, "client")
+
+    _seed_catalog(client_meal_plans_api_client)
+
+    invalid_single = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"zip_code": "abcde"},
+        headers=client_headers,
+    )
+    assert invalid_single.status_code == 422
+    assert invalid_single.json() == {"detail": "invalid_zip_code"}
+
+    invalid_multi = client_meal_plans_api_client.get(
+        "/meal-plans",
+        params={"zip_codes": "10001,abcde"},
+        headers=client_headers,
+    )
+    assert invalid_multi.status_code == 422
+    assert invalid_multi.json() == {"detail": "invalid_zip_code"}

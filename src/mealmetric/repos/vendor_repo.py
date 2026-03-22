@@ -1,3 +1,4 @@
+import re
 import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -32,6 +33,7 @@ _DISCOVERABLE_AVAILABILITY_STATUSES = (
     MealPlanAvailabilityStatus.SCHEDULED,
     MealPlanAvailabilityStatus.AVAILABLE,
 )
+_ZIP_CODE_PATTERN = re.compile(r"^\d{5}$")
 
 
 def normalize_zip_code(zip_code: str | None) -> str | None:
@@ -42,6 +44,33 @@ def normalize_zip_code(zip_code: str | None) -> str | None:
         return digits
     stripped = zip_code.strip()
     return stripped or None
+
+
+def normalize_zip_filter(zip_code: str | None) -> str | None:
+    if zip_code is None:
+        return None
+    normalized = zip_code.strip()
+    if not normalized:
+        return None
+    if not _ZIP_CODE_PATTERN.fullmatch(normalized):
+        raise ValueError("invalid_zip_code")
+    return normalized
+
+
+def normalize_zip_filters(zip_codes: Sequence[str] | None) -> tuple[str, ...]:
+    if zip_codes is None:
+        return ()
+
+    normalized_zip_codes: list[str] = []
+    seen: set[str] = set()
+    for raw_zip_code in zip_codes:
+        for candidate in raw_zip_code.split(","):
+            normalized = normalize_zip_filter(candidate)
+            if normalized is None or normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_zip_codes.append(normalized)
+    return tuple(normalized_zip_codes)
 
 
 def _meal_plan_totals_subquery(*, discoverable_only: bool) -> Subquery:
@@ -415,12 +444,14 @@ def list_meal_plans(
     session: Session,
     *,
     vendor_id: uuid.UUID | None = None,
+    q: str | None = None,
     discoverable_only: bool = True,
     calorie_min: int | None = None,
     calorie_max: int | None = None,
     price_min_cents: int | None = None,
     price_max_cents: int | None = None,
     zip_code: str | None = None,
+    zip_codes: Sequence[str] | None = None,
     available_on: date | None = None,
     pickup_window_id: uuid.UUID | None = None,
 ) -> list[MealPlan]:
@@ -433,9 +464,22 @@ def list_meal_plans(
 
     if vendor_id is not None:
         stmt = stmt.where(MealPlan.vendor_id == vendor_id)
-    normalized_zip = normalize_zip_code(zip_code)
-    if normalized_zip is not None:
-        stmt = stmt.where(Vendor.zip_code == normalized_zip)
+    normalized_query = q.strip().lower() if q is not None else None
+    if normalized_query:
+        search_term = f"%{normalized_query}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(MealPlan.name).like(search_term),
+                func.lower(Vendor.name).like(search_term),
+            )
+        )
+    normalized_zip_codes = normalize_zip_filters(zip_codes)
+    if normalized_zip_codes:
+        stmt = stmt.where(Vendor.zip_code.in_(normalized_zip_codes))
+    else:
+        normalized_zip = normalize_zip_filter(zip_code)
+        if normalized_zip is not None:
+            stmt = stmt.where(Vendor.zip_code == normalized_zip)
     if discoverable_only:
         stmt = _apply_meal_plan_discoverable_filters(
             stmt,
