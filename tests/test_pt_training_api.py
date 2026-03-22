@@ -219,6 +219,310 @@ def test_pt_client_detail_requires_active_link(
     assert response.json() == {"detail": "pt_client_link_not_active"}
 
 
+def test_pt_dashboard_returns_real_client_summaries(
+    training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt_headers,
+    )
+
+    package_response = training_api_client.post(
+        "/pt/packages",
+        json={
+            "title": "Dashboard Package",
+            "status": "active",
+            "is_template": False,
+        },
+        headers=pt_headers,
+    )
+    assert package_response.status_code == 201
+
+    training_api_client.post(
+        f"/pt/clients/{client_user_id}/assignments",
+        json={
+            "training_package_id": package_response.json()["id"],
+            "status": "assigned",
+        },
+        headers=pt_headers,
+    )
+
+    routine_response = training_api_client.post(
+        "/pt/routines",
+        json={"title": "Dashboard Routine"},
+        headers=pt_headers,
+    )
+    assert routine_response.status_code == 201
+
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "routine_id": routine_response.json()["id"],
+            "performed_at": "2026-03-19T13:30:00Z",
+            "completion_status": "completed",
+        },
+        headers=client_headers,
+    )
+    assert create_log_response.status_code == 201
+
+    response = training_api_client.get("/pt/dashboard", headers=pt_headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    item = payload["items"][0]
+    assert item["client"]["id"] == str(client_user_id)
+    assert item["client"]["email"].endswith("@example.com")
+    assert item["status"] == "active"
+    assert item["assignment_count"] == 1
+    assert item["workout_log_count"] == 1
+    assert item["latest_workout_log_at"].startswith("2026-03-19T13:30:00")
+    assert item["metrics_snapshot"]["client_user_id"] == str(client_user_id)
+
+
+def test_pt_can_list_client_workout_logs_with_structured_entries(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    link_response = training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt_headers,
+    )
+    assert link_response.status_code == 201
+
+    routine_response = training_api_client.post(
+        "/pt/routines",
+        json={"title": "Lower Body A", "estimated_minutes": 55},
+        headers=pt_headers,
+    )
+    assert routine_response.status_code == 201
+    routine_id = routine_response.json()["id"]
+
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "routine_id": routine_id,
+            "performed_at": "2026-03-18T13:30:00Z",
+            "duration_minutes": 54,
+            "completion_status": "completed",
+            "client_notes": "Felt strong.",
+            "exercise_entries": [
+                {
+                    "position": 0,
+                    "exercise_name": "Back Squat",
+                    "sets": 4,
+                    "reps": 6,
+                    "weight": "225.00",
+                },
+                {
+                    "position": 1,
+                    "exercise_name": "Walking Lunge",
+                    "duration_seconds": 120,
+                    "notes": "Per leg finisher",
+                },
+            ],
+        },
+        headers=client_headers,
+    )
+    assert create_log_response.status_code == 201
+
+    response = training_api_client.get(
+        f"/pt/clients/{client_user_id}/workout-logs",
+        headers=pt_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["routine_id"] == routine_id
+    assert payload["items"][0]["routine_title"] == "Lower Body A"
+    assert payload["items"][0]["duration_minutes"] == 54
+    assert payload["items"][0]["exercise_entries"][0]["position"] == 0
+    assert payload["items"][0]["exercise_entries"][0]["exercise_name"] == "Back Squat"
+    assert payload["items"][0]["exercise_entries"][1]["position"] == 1
+    assert payload["items"][0]["exercise_entries"][1]["notes"] == "Per leg finisher"
+
+
+def test_pt_client_workout_logs_require_legitimate_scope(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt1_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    pt2_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    link_response = training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt1_headers,
+    )
+    assert link_response.status_code == 201
+
+    response = training_api_client.get(
+        f"/pt/clients/{client_user_id}/workout-logs",
+        headers=pt2_headers,
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "workout_logs_not_in_scope"}
+
+
+def test_pt_can_update_workout_log_notes_for_valid_client(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt_headers,
+    )
+    routine_response = training_api_client.post(
+        "/pt/routines",
+        json={"title": "Upper A"},
+        headers=pt_headers,
+    )
+    routine_id = routine_response.json()["id"]
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={"routine_id": routine_id, "completion_status": "completed"},
+        headers=client_headers,
+    )
+    assert create_log_response.status_code == 201
+    workout_log_id = create_log_response.json()["id"]
+
+    response = training_api_client.patch(
+        f"/pt/workout-logs/{workout_log_id}/pt-notes",
+        json={"pt_notes": "  Keep knees out on the main sets.  "},
+        headers=pt_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == workout_log_id
+    assert payload["pt_notes"] == "Keep knees out on the main sets."
+    assert payload["exercise_entries"] == []
+
+
+def test_pt_cannot_update_workout_log_notes_outside_scope(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt1_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    pt2_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt1_headers,
+    )
+    routine_response = training_api_client.post(
+        "/pt/routines",
+        json={"title": "Lower B"},
+        headers=pt1_headers,
+    )
+    routine_id = routine_response.json()["id"]
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={"routine_id": routine_id, "completion_status": "completed"},
+        headers=client_headers,
+    )
+    workout_log_id = create_log_response.json()["id"]
+
+    response = training_api_client.patch(
+        f"/pt/workout-logs/{workout_log_id}/pt-notes",
+        json={"pt_notes": "Not allowed"},
+        headers=pt2_headers,
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "workout_log_not_found"}
+
+
+def test_pt_can_clear_workout_log_notes(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt_headers,
+    )
+    routine_response = training_api_client.post(
+        "/pt/routines",
+        json={"title": "Conditioning"},
+        headers=pt_headers,
+    )
+    routine_id = routine_response.json()["id"]
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={"routine_id": routine_id, "completion_status": "completed"},
+        headers=client_headers,
+    )
+    workout_log_id = create_log_response.json()["id"]
+
+    set_response = training_api_client.patch(
+        f"/pt/workout-logs/{workout_log_id}/pt-notes",
+        json={"pt_notes": "Push the pace next week."},
+        headers=pt_headers,
+    )
+    assert set_response.status_code == 200
+    assert set_response.json()["pt_notes"] == "Push the pace next week."
+
+    clear_response = training_api_client.patch(
+        f"/pt/workout-logs/{workout_log_id}/pt-notes",
+        json={"pt_notes": "   "},
+        headers=pt_headers,
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["pt_notes"] is None
+
+
+def test_non_pt_access_to_workout_log_note_update_is_rejected(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client_user_id), "status": "active"},
+        headers=pt_headers,
+    )
+    routine_response = training_api_client.post(
+        "/pt/routines",
+        json={"title": "Tempo Run"},
+        headers=pt_headers,
+    )
+    routine_id = routine_response.json()["id"]
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={"routine_id": routine_id, "completion_status": "completed"},
+        headers=client_headers,
+    )
+    workout_log_id = create_log_response.json()["id"]
+
+    response = training_api_client.patch(
+        f"/pt/workout-logs/{workout_log_id}/pt-notes",
+        json={"pt_notes": "Client should not reach this route."},
+        headers=client_headers,
+    )
+    assert response.status_code == 403
+
+
 def test_pt_client_link_status_update_hides_cross_pt_resource(
     training_api_client: TestClient, bff_headers: dict[str, str]
 ) -> None:

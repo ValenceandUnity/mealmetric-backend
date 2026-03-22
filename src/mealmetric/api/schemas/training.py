@@ -62,6 +62,28 @@ class PTClientDetailRead(BaseModel):
     metrics_snapshot: OverviewMetricsResponse
 
 
+class PTDashboardClientSummaryRead(BaseModel):
+    id: uuid.UUID
+    pt_user_id: uuid.UUID
+    client_user_id: uuid.UUID
+    status: PtClientLinkStatus
+    started_at: datetime | None
+    ended_at: datetime | None
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+    client: PTClientProfileRead
+    assignment_count: int
+    workout_log_count: int
+    latest_workout_log_at: datetime | None
+    metrics_snapshot: OverviewMetricsResponse | None
+
+
+class PTDashboardClientSummaryListResponse(BaseModel):
+    items: list[PTDashboardClientSummaryRead]
+    count: int
+
+
 class PTClientLinkCreateRequest(BaseModel):
     client_user_id: uuid.UUID
     status: PtClientLinkStatus = PtClientLinkStatus.PENDING
@@ -249,3 +271,7 @@ class ClientAssignmentCreateRequest(BaseModel):
 
 class ClientAssignmentStatusUpdateRequest(BaseModel):
     status: AssignmentStatus
+
+
+class PTWorkoutLogNotesUpdateRequest(BaseModel):
+    pt_notes: str | None = None

@@ -138,6 +138,7 @@ def _to_workout_log_read(workout_log: WorkoutLog) -> ClientWorkoutLogRead:
         pt_user_id=workout_log.pt_user_id,
         assignment_id=workout_log.assignment_id,
         routine_id=workout_log.routine_id,
+        routine_title=workout_log.routine.title if workout_log.routine is not None else None,
         performed_at=workout_log.performed_at,
         duration_minutes=workout_log.duration_minutes,
         completion_status=workout_log.completion_status,

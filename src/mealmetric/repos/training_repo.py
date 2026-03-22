@@ -572,10 +572,33 @@ def create_workout_log(
     return workout_log
 
 
+def get_workout_log_for_pt(
+    session: Session,
+    *,
+    workout_log_id: uuid.UUID,
+    pt_user_id: uuid.UUID,
+) -> WorkoutLog | None:
+    stmt: Select[tuple[WorkoutLog]] = (
+        select(WorkoutLog)
+        .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
+        .where(
+            WorkoutLog.id == workout_log_id,
+            WorkoutLog.pt_user_id == pt_user_id,
+        )
+    )
+    return session.scalar(stmt)
+
+
+def save_workout_log(session: Session, workout_log: WorkoutLog) -> WorkoutLog:
+    session.add(workout_log)
+    session.flush()
+    return workout_log
+
+
 def list_workout_logs_for_client(session: Session, client_user_id: uuid.UUID) -> list[WorkoutLog]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
-        .options(selectinload(WorkoutLog.exercise_entries))
+        .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
         .where(WorkoutLog.client_user_id == client_user_id)
         .order_by(
             WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
@@ -587,7 +610,7 @@ def list_workout_logs_for_client(session: Session, client_user_id: uuid.UUID) ->
 def list_workout_logs_for_pt(session: Session, pt_user_id: uuid.UUID) -> list[WorkoutLog]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
-        .options(selectinload(WorkoutLog.exercise_entries))
+        .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
         .where(WorkoutLog.pt_user_id == pt_user_id)
         .order_by(
             WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
@@ -604,7 +627,7 @@ def list_workout_logs_for_pt_client(
 ) -> list[WorkoutLog]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
-        .options(selectinload(WorkoutLog.exercise_entries))
+        .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
         .where(
             WorkoutLog.pt_user_id == pt_user_id,
             WorkoutLog.client_user_id == client_user_id,

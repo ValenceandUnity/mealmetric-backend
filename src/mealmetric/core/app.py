@@ -19,6 +19,7 @@ from mealmetric.api.client_training import router as client_training_router
 from mealmetric.api.db_health import router as db_health_router
 from mealmetric.api.health import router as health_router
 from mealmetric.api.metrics import router as metrics_router
+from mealmetric.api.notifications import router as notifications_router
 from mealmetric.api.ping import router as ping_router
 from mealmetric.api.pt_meal_plan_recommendations import (
     router as pt_meal_plan_recommendations_router,
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(metrics_router)
+    app.include_router(notifications_router)
     app.include_router(db_health_router)
     app.include_router(ping_router)
     app.include_router(bff_router)

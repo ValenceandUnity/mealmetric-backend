@@ -15,6 +15,11 @@ from mealmetric.api.schemas.metrics import (
     MetricsFreshnessResponse,
     OverviewMetricsResponse,
 )
+from mealmetric.api.schemas.client_training import (
+    ClientWorkoutLogExerciseEntryRead,
+    ClientWorkoutLogListResponse,
+    ClientWorkoutLogRead,
+)
 from mealmetric.api.schemas.training import (
     ChecklistItemListResponse,
     ChecklistItemRead,
@@ -26,6 +31,8 @@ from mealmetric.api.schemas.training import (
     PackageRoutineListResponse,
     PackageRoutineRead,
     PackageRoutineReplaceRequest,
+    PTDashboardClientSummaryListResponse,
+    PTDashboardClientSummaryRead,
     PTClientDetailRead,
     PTClientLinkCreateRequest,
     PTClientLinkListResponse,
@@ -38,6 +45,7 @@ from mealmetric.api.schemas.training import (
     PTFolderUpdateRequest,
     PTProfileRead,
     PTProfileUpdateRequest,
+    PTWorkoutLogNotesUpdateRequest,
     RoutineCreateRequest,
     RoutineListResponse,
     RoutineRead,
@@ -57,6 +65,7 @@ from mealmetric.models.training import (
     Routine,
     TrainingPackage,
     TrainingPackageRoutine,
+    WorkoutLog,
 )
 from mealmetric.models.user import Role, User
 from mealmetric.services.metrics_service import MetricsFreshness, OverviewMetricsView
@@ -65,6 +74,7 @@ from mealmetric.services.training_service import (
     ChecklistItemInput,
     ChecklistService,
     PackageRoutineInput,
+    PTDashboardClientSummaryView,
     PTClientDetailView,
     PtClientLinkService,
     PtFolderService,
@@ -75,6 +85,7 @@ from mealmetric.services.training_service import (
     TrainingPackageService,
     TrainingPermissionError,
     TrainingValidationError,
+    WorkoutLogService,
 )
 
 router = APIRouter(
@@ -235,6 +246,39 @@ def _assignment_to_read(
     )
 
 
+def _workout_log_to_read(workout_log: WorkoutLog) -> ClientWorkoutLogRead:
+    return ClientWorkoutLogRead(
+        id=workout_log.id,
+        client_user_id=workout_log.client_user_id,
+        pt_user_id=workout_log.pt_user_id,
+        assignment_id=workout_log.assignment_id,
+        routine_id=workout_log.routine_id,
+        routine_title=workout_log.routine.title if workout_log.routine is not None else None,
+        performed_at=workout_log.performed_at,
+        duration_minutes=workout_log.duration_minutes,
+        completion_status=workout_log.completion_status,
+        client_notes=workout_log.client_notes,
+        pt_notes=workout_log.pt_notes,
+        exercise_entries=[
+            ClientWorkoutLogExerciseEntryRead(
+                id=entry.id,
+                exercise_name=entry.exercise_name,
+                sets=entry.sets,
+                reps=entry.reps,
+                weight=entry.weight,
+                duration_seconds=entry.duration_seconds,
+                notes=entry.notes,
+                position=entry.position,
+                created_at=entry.created_at,
+                updated_at=entry.updated_at,
+            )
+            for entry in workout_log.exercise_entries
+        ],
+        created_at=workout_log.created_at,
+        updated_at=workout_log.updated_at,
+    )
+
+
 def _freshness_to_response(freshness: MetricsFreshness) -> MetricsFreshnessResponse:
     return MetricsFreshnessResponse(
         source=freshness.source,
@@ -280,6 +324,36 @@ def _client_detail_to_read(view: PTClientDetailView) -> PTClientDetailRead:
     )
 
 
+def _dashboard_client_summary_to_read(
+    view: PTDashboardClientSummaryView,
+) -> PTDashboardClientSummaryRead:
+    return PTDashboardClientSummaryRead(
+        id=view.link.id,
+        pt_user_id=view.link.pt_user_id,
+        client_user_id=view.link.client_user_id,
+        status=view.link.status,
+        started_at=view.link.started_at,
+        ended_at=view.link.ended_at,
+        notes=view.link.notes,
+        created_at=view.link.created_at,
+        updated_at=view.link.updated_at,
+        client=PTClientProfileRead(
+            id=view.client.id,
+            email=view.client.email,
+            role=view.client.role,
+            created_at=view.client.created_at,
+        ),
+        assignment_count=view.assignment_count,
+        workout_log_count=view.workout_log_count,
+        latest_workout_log_at=view.latest_workout_log_at,
+        metrics_snapshot=(
+            _overview_to_response(view.metrics_snapshot)
+            if view.metrics_snapshot is not None
+            else None
+        ),
+    )
+
+
 @router.get("/profile/me", response_model=PTProfileRead)
 def get_pt_profile_me(db: DBSessionDep, current_user: CurrentUserDep) -> PTProfileRead:
     session = _require_db(db)
@@ -320,6 +394,18 @@ def list_pt_clients(db: DBSessionDep, current_user: CurrentUserDep) -> PTClientL
     links = service.list_for_pt(current_user.id)
     items = [_client_link_to_read(link) for link in links]
     return PTClientLinkListResponse(items=items, count=len(items))
+
+
+@router.get("/dashboard", response_model=PTDashboardClientSummaryListResponse)
+def list_pt_dashboard_clients(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> PTDashboardClientSummaryListResponse:
+    session = _require_db(db)
+    service = PtClientLinkService(session)
+    summaries = service.list_dashboard_clients(current_user.id)
+    items = [_dashboard_client_summary_to_read(item) for item in summaries]
+    return PTDashboardClientSummaryListResponse(items=items, count=len(items))
 
 
 @router.get("/clients/links", response_model=PTClientLinkListResponse)
@@ -826,6 +912,53 @@ def list_client_assignments(
     )
     items = [_assignment_to_read(assignment) for assignment in assignments]
     return ClientAssignmentListResponse(items=items, count=len(items))
+
+
+@router.get(
+    "/clients/{client_user_id}/workout-logs",
+    response_model=ClientWorkoutLogListResponse,
+)
+def list_client_workout_logs(
+    client_user_id: UUID,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> ClientWorkoutLogListResponse:
+    session = _require_db(db)
+    service = WorkoutLogService(session)
+    try:
+        workout_logs = service.list_workout_logs_for_client(
+            requester_user_id=current_user.id,
+            client_user_id=client_user_id,
+        )
+    except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
+        raise _translate_service_error(exc) from exc
+
+    items = [_workout_log_to_read(workout_log) for workout_log in workout_logs]
+    return ClientWorkoutLogListResponse(items=items, count=len(items))
+
+
+@router.patch(
+    "/workout-logs/{workout_log_id}/pt-notes",
+    response_model=ClientWorkoutLogRead,
+)
+def update_workout_log_pt_notes(
+    workout_log_id: UUID,
+    payload: PTWorkoutLogNotesUpdateRequest,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> ClientWorkoutLogRead:
+    session = _require_db(db)
+    service = WorkoutLogService(session)
+
+    def _operation() -> WorkoutLog:
+        return service.update_pt_notes(
+            workout_log_id=workout_log_id,
+            pt_user_id=current_user.id,
+            pt_notes=payload.pt_notes,
+        )
+
+    workout_log = _run_mutation(session, _operation)
+    return _workout_log_to_read(workout_log)
 
 
 @router.post(

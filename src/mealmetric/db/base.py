@@ -10,6 +10,7 @@ import mealmetric.models.audit_log  # noqa: F401, E402
 import mealmetric.models.auth_failure_tracker  # noqa: F401, E402
 import mealmetric.models.bookmark  # noqa: F401, E402
 import mealmetric.models.metrics  # noqa: F401, E402
+import mealmetric.models.notification  # noqa: F401, E402
 import mealmetric.models.order  # noqa: F401, E402
 import mealmetric.models.order_item  # noqa: F401, E402
 import mealmetric.models.payment_audit_log  # noqa: F401, E402

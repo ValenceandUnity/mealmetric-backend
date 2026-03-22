@@ -73,6 +73,7 @@ class ClientWorkoutLogRead(BaseModel):
     pt_user_id: uuid.UUID
     assignment_id: uuid.UUID | None
     routine_id: uuid.UUID | None
+    routine_title: str | None
     performed_at: datetime
     duration_minutes: int | None
     completion_status: WorkoutCompletionStatus

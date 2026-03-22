@@ -26,6 +26,7 @@ from mealmetric.models.training import (
 from mealmetric.models.user import Role
 from mealmetric.repos import audit_log_repo, training_repo, user_repo
 from mealmetric.services.metrics_service import MetricsService, OverviewMetricsView
+from mealmetric.services.notification_service import NotificationService
 
 _AUDIT_LOGGER = logging.getLogger("mealmetric.training.audit")
 
@@ -89,6 +90,16 @@ class PTClientDetailView:
     client: PTClientProfileView
     current_assignments: tuple[ClientTrainingPackageAssignment, ...]
     metrics_snapshot: OverviewMetricsView
+
+
+@dataclass(frozen=True, slots=True)
+class PTDashboardClientSummaryView:
+    link: PtClientLink
+    client: PTClientProfileView
+    assignment_count: int
+    workout_log_count: int
+    latest_workout_log_at: datetime | None
+    metrics_snapshot: OverviewMetricsView | None
 
 
 class PtProfileService:
@@ -177,6 +188,53 @@ class PtClientLinkService:
 
     def list_for_pt(self, pt_user_id: uuid.UUID) -> list[PtClientLink]:
         return training_repo.list_pt_client_links_for_pt(self._session, pt_user_id)
+
+    def list_dashboard_clients(self, pt_user_id: uuid.UUID) -> list[PTDashboardClientSummaryView]:
+        summaries: list[PTDashboardClientSummaryView] = []
+        metrics_service = MetricsService(self._session)
+
+        for link in self.list_for_pt(pt_user_id):
+            client_user = user_repo.get_by_id(self._session, link.client_user_id)
+            if client_user is None or client_user.role != Role.CLIENT:
+                continue
+
+            assignments = training_repo.list_assignments_for_pt_client(
+                self._session,
+                pt_user_id=pt_user_id,
+                client_user_id=client_user.id,
+            )
+            workout_logs = training_repo.list_workout_logs_for_pt_client(
+                self._session,
+                pt_user_id=pt_user_id,
+                client_user_id=client_user.id,
+            )
+
+            metrics_snapshot: OverviewMetricsView | None = None
+            if link.status == PtClientLinkStatus.ACTIVE:
+                metrics_snapshot = metrics_service.get_pt_client_overview(
+                    pt_user_id=pt_user_id,
+                    client_user_id=client_user.id,
+                )
+
+            summaries.append(
+                PTDashboardClientSummaryView(
+                    link=link,
+                    client=PTClientProfileView(
+                        id=client_user.id,
+                        email=client_user.email,
+                        role=client_user.role.value,
+                        created_at=client_user.created_at,
+                    ),
+                    assignment_count=len(assignments),
+                    workout_log_count=len(workout_logs),
+                    latest_workout_log_at=(
+                        workout_logs[0].performed_at if workout_logs else None
+                    ),
+                    metrics_snapshot=metrics_snapshot,
+                )
+            )
+
+        return summaries
 
     def list_for_client(self, client_user_id: uuid.UUID) -> list[PtClientLink]:
         return training_repo.list_pt_client_links_for_client(self._session, client_user_id)
@@ -668,6 +726,11 @@ class AssignmentService:
                 },
                 message="PT assigned a training package to a client",
             )
+            NotificationService(self._session).create_pt_assignment_created_notification(
+                client_user_id=client_user_id,
+                pt_user_id=pt_user_id,
+                assignment_id=assignment.id,
+            )
             return assignment
         except IntegrityError as exc:
             raise TrainingValidationError("invalid_assignment_relationship") from exc
@@ -871,6 +934,11 @@ class ClientTrainingService:
                 "routine_id": str(routine_id) if routine_id is not None else None,
             },
         )
+        NotificationService(self._session).create_client_workout_logged_notification(
+            pt_user_id=pt_user_id,
+            client_user_id=client_user_id,
+            workout_log_id=workout_log.id,
+        )
         return workout_log
 
 
@@ -985,6 +1053,49 @@ class WorkoutLogService:
 
     def list_workout_logs_for_pt(self, pt_user_id: uuid.UUID) -> list[WorkoutLog]:
         return training_repo.list_workout_logs_for_pt(self._session, pt_user_id)
+
+    def update_pt_notes(
+        self,
+        *,
+        workout_log_id: uuid.UUID,
+        pt_user_id: uuid.UUID,
+        pt_notes: str | None,
+    ) -> WorkoutLog:
+        workout_log = training_repo.get_workout_log_for_pt(
+            self._session,
+            workout_log_id=workout_log_id,
+            pt_user_id=pt_user_id,
+        )
+        if workout_log is None:
+            raise TrainingNotFoundError("workout_log_not_found")
+
+        pt_client_link = training_repo.get_pt_client_link_by_pair(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=workout_log.client_user_id,
+        )
+        if pt_client_link is None:
+            raise TrainingPermissionError("workout_logs_not_in_scope")
+
+        had_pt_notes = workout_log.pt_notes is not None
+        normalized_pt_notes = pt_notes.strip() if pt_notes is not None else None
+        workout_log.pt_notes = normalized_pt_notes or None
+        updated_workout_log = training_repo.save_workout_log(self._session, workout_log)
+        if not had_pt_notes and updated_workout_log.pt_notes is not None:
+            NotificationService(self._session).create_pt_workout_note_added_notification(
+                client_user_id=updated_workout_log.client_user_id,
+                pt_user_id=pt_user_id,
+                workout_log_id=updated_workout_log.id,
+            )
+        _AUDIT_LOGGER.info(
+            "workout_log_pt_notes_updated",
+            extra={
+                "client_user_id": str(updated_workout_log.client_user_id),
+                "pt_user_id": str(pt_user_id),
+                "workout_log_id": str(updated_workout_log.id),
+            },
+        )
+        return updated_workout_log
 
     def _normalize_exercise_entries(
         self,

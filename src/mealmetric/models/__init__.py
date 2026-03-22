@@ -13,6 +13,7 @@ from mealmetric.models.metrics import (
     StrengthMetricRollup,
     WeeklyMetricRollup,
 )
+from mealmetric.models.notification import Notification, NotificationType
 from mealmetric.models.order import Order, OrderFulfillmentStatus, OrderPaymentStatus
 from mealmetric.models.order_item import OrderItem, OrderItemType
 from mealmetric.models.payment_audit_log import PaymentAuditLog, PaymentTransitionSource
@@ -88,6 +89,8 @@ __all__ = [
     "MealPlanStatus",
     "MetricRecordSource",
     "NormalizedRole",
+    "Notification",
+    "NotificationType",
     "Order",
     "OrderFulfillmentStatus",
     "OrderItem",
