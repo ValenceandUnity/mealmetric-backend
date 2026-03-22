@@ -52,9 +52,7 @@ def _translate_service_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="internal_error",
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error"
-    )
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error")
 
 
 def _parse_iso_date(raw: str | None, detail: str) -> date | None:
@@ -192,38 +190,26 @@ def get_metrics_history(
     return MetricsHistoryResponse(
         client_user_id=view.client_user_id,
         as_of_date=view.as_of_date,
-        week_start_date=(
-            latest_week.week_start_date if latest_week is not None else None
-        ),
+        week_start_date=(latest_week.week_start_date if latest_week is not None else None),
         week_end_date=latest_week.week_end_date if latest_week is not None else None,
         business_timezone=view.business_timezone,
         week_start_day=view.week_start_day,
-        total_intake_calories=(
-            latest_week.total_intake_calories if latest_week is not None else 0
-        ),
+        total_intake_calories=(latest_week.total_intake_calories if latest_week is not None else 0),
         total_expenditure_calories=(
             latest_week.total_expenditure_calories if latest_week is not None else 0
         ),
-        net_calorie_balance=(
-            latest_week.net_calorie_balance if latest_week is not None else 0
-        ),
+        net_calorie_balance=(latest_week.net_calorie_balance if latest_week is not None else 0),
         weekly_target_deficit_calories=(
-            latest_week.weekly_target_deficit_calories
-            if latest_week is not None
-            else None
+            latest_week.weekly_target_deficit_calories if latest_week is not None else None
         ),
         deficit_progress_percent=(
             latest_week.deficit_progress_percent if latest_week is not None else None
         ),
         current_intake_ceiling_calories=(
-            latest_week.current_intake_ceiling_calories
-            if latest_week is not None
-            else None
+            latest_week.current_intake_ceiling_calories if latest_week is not None else None
         ),
         current_expenditure_floor_calories=(
-            latest_week.current_expenditure_floor_calories
-            if latest_week is not None
-            else None
+            latest_week.current_expenditure_floor_calories if latest_week is not None else None
         ),
         has_data=latest_week.has_data if latest_week is not None else False,
         freshness=(

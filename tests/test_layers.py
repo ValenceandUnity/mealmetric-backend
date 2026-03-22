@@ -1,5 +1,5 @@
 import pytest
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy.orm import Session
 
 from mealmetric.db import session as db_session
@@ -24,7 +24,9 @@ def test_user_model_defaults() -> None:
 
 
 def test_user_role_enum_binds_lowercase_values_for_postgres() -> None:
-    bind_processor = User.__table__.c.role.type.bind_processor(postgresql.dialect())
+    bind_processor = User.__table__.c.role.type.bind_processor(
+        PGDialect()  # type: ignore[no-untyped-call]
+    )
     assert bind_processor is not None
 
     assert bind_processor(Role.CLIENT) == "client"
@@ -77,7 +79,9 @@ def test_db_session_generator_returns_none_when_engine_lookup_fails(
     class _Request:
         state = _RequestState()
 
-    monkeypatch.setattr(db_session, "get_engine", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        db_session, "get_engine", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     caplog.set_level("ERROR", logger="mealmetric.db")
 
     gen = db_session.get_db(_Request())  # type: ignore[arg-type]

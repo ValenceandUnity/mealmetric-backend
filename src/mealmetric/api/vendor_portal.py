@@ -32,7 +32,9 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 def _require_db(db: Session | None) -> Session:
     if db is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="db_unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="db_unavailable"
+        )
     return db
 
 
@@ -83,7 +85,9 @@ def _me_to_read(view: VendorPortalMeView) -> VendorPortalMeResponse:
         email=view.email,
         vendor_ids=list(view.vendor_ids),
         default_vendor=(
-            _vendor_identity_to_read(view.default_vendor) if view.default_vendor is not None else None
+            _vendor_identity_to_read(view.default_vendor)
+            if view.default_vendor is not None
+            else None
         ),
         vendors=[_vendor_identity_to_read(item) for item in view.vendors],
     )

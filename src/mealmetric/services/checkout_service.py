@@ -105,9 +105,7 @@ class CheckoutService:
             if context.subtotal_amount_cents is not None
             else unit_amount_cents * quantity
         )
-        tax_amount_cents = (
-            context.tax_amount_cents if context.tax_amount_cents is not None else 0
-        )
+        tax_amount_cents = context.tax_amount_cents if context.tax_amount_cents is not None else 0
         total_amount_cents = (
             context.total_amount_cents
             if context.total_amount_cents is not None

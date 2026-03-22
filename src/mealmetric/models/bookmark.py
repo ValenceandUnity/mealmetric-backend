@@ -40,7 +40,9 @@ class BookmarkFolder(Base):
 class BookmarkItem(Base):
     __tablename__ = "bookmark_items"
     __table_args__ = (
-        UniqueConstraint("folder_id", "meal_plan_id", name="uq_bookmark_items_folder_id_meal_plan_id"),
+        UniqueConstraint(
+            "folder_id", "meal_plan_id", name="uq_bookmark_items_folder_id_meal_plan_id"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -62,4 +64,3 @@ class BookmarkItem(Base):
     )
 
     folder: Mapped["BookmarkFolder"] = relationship("BookmarkFolder", back_populates="items")
-

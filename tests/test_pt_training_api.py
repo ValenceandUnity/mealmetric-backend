@@ -73,9 +73,7 @@ def _register_token(client: TestClient, bff_headers: dict[str, str], role: str) 
     return str(response.json()["access_token"])
 
 
-def _headers_for_role(
-    client: TestClient, bff_headers: dict[str, str], role: str
-) -> dict[str, str]:
+def _headers_for_role(client: TestClient, bff_headers: dict[str, str], role: str) -> dict[str, str]:
     token = _register_token(client, bff_headers, role)
     return {"Authorization": f"Bearer {token}", **bff_headers}
 
@@ -86,9 +84,7 @@ def _current_user_id(client: TestClient, headers: dict[str, str]) -> UUID:
     return UUID(str(response.json()["id"]))
 
 
-def _seed_pt_profile(
-    client: TestClient, user_id: UUID, display_name: str = "Coach"
-) -> None:
+def _seed_pt_profile(client: TestClient, user_id: UUID, display_name: str = "Coach") -> None:
     app = client.app
     assert isinstance(app, FastAPI)
     session_factory = cast(sessionmaker[Session], app.state.testing_session_local)
@@ -218,9 +214,7 @@ def test_pt_client_detail_requires_active_link(
     client_headers = _headers_for_role(training_api_client, bff_headers, "client")
     client_user_id = _current_user_id(training_api_client, client_headers)
 
-    response = training_api_client.get(
-        f"/pt/clients/{client_user_id}", headers=pt_headers
-    )
+    response = training_api_client.get(f"/pt/clients/{client_user_id}", headers=pt_headers)
     assert response.status_code == 403
     assert response.json() == {"detail": "pt_client_link_not_active"}
 
@@ -281,9 +275,7 @@ def test_pt_folder_crud_and_scope(
     )
     assert forbidden_response.status_code == 404
 
-    delete_response = training_api_client.delete(
-        f"/pt/folders/{folder_id}", headers=pt1_headers
-    )
+    delete_response = training_api_client.delete(f"/pt/folders/{folder_id}", headers=pt1_headers)
     assert delete_response.status_code == 204
 
 
@@ -305,9 +297,7 @@ def test_pt_routine_crud_archive_and_scope(
     assert list_response.status_code == 200
     assert list_response.json()["count"] == 1
 
-    detail_response = training_api_client.get(
-        f"/pt/routines/{routine_id}", headers=pt1_headers
-    )
+    detail_response = training_api_client.get(f"/pt/routines/{routine_id}", headers=pt1_headers)
     assert detail_response.status_code == 200
 
     update_response = training_api_client.patch(
@@ -324,14 +314,10 @@ def test_pt_routine_crud_archive_and_scope(
     assert update_response.status_code == 200
     assert update_response.json()["title"] == "Push Day V2"
 
-    other_pt_response = training_api_client.get(
-        f"/pt/routines/{routine_id}", headers=pt2_headers
-    )
+    other_pt_response = training_api_client.get(f"/pt/routines/{routine_id}", headers=pt2_headers)
     assert other_pt_response.status_code == 404
 
-    archive_response = training_api_client.delete(
-        f"/pt/routines/{routine_id}", headers=pt1_headers
-    )
+    archive_response = training_api_client.delete(f"/pt/routines/{routine_id}", headers=pt1_headers)
     assert archive_response.status_code == 200
     assert archive_response.json()["is_archived"] is True
 
@@ -354,9 +340,7 @@ def test_pt_package_crud_archive_and_scope(
     assert list_response.status_code == 200
     assert list_response.json()["count"] == 1
 
-    detail_response = training_api_client.get(
-        f"/pt/packages/{package_id}", headers=pt1_headers
-    )
+    detail_response = training_api_client.get(f"/pt/packages/{package_id}", headers=pt1_headers)
     assert detail_response.status_code == 200
 
     update_response = training_api_client.patch(
@@ -374,14 +358,10 @@ def test_pt_package_crud_archive_and_scope(
     assert update_response.status_code == 200
     assert update_response.json()["status"] == "active"
 
-    other_pt_response = training_api_client.get(
-        f"/pt/packages/{package_id}", headers=pt2_headers
-    )
+    other_pt_response = training_api_client.get(f"/pt/packages/{package_id}", headers=pt2_headers)
     assert other_pt_response.status_code == 404
 
-    archive_response = training_api_client.delete(
-        f"/pt/packages/{package_id}", headers=pt1_headers
-    )
+    archive_response = training_api_client.delete(f"/pt/packages/{package_id}", headers=pt1_headers)
     assert archive_response.status_code == 200
     assert archive_response.json()["status"] == "archived"
 
@@ -794,13 +774,9 @@ def test_package_composition_duplicate_positions_rejected(
 ) -> None:
     pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
 
-    r1 = training_api_client.post(
-        "/pt/routines", json={"title": "R1"}, headers=pt_headers
-    )
+    r1 = training_api_client.post("/pt/routines", json={"title": "R1"}, headers=pt_headers)
     assert r1.status_code == 201
-    r2 = training_api_client.post(
-        "/pt/routines", json={"title": "R2"}, headers=pt_headers
-    )
+    r2 = training_api_client.post("/pt/routines", json={"title": "R2"}, headers=pt_headers)
     assert r2.status_code == 201
     package = training_api_client.post(
         "/pt/packages",
@@ -851,7 +827,5 @@ def test_assignment_created_at_is_server_generated(
         headers=pt_headers,
     )
     assert assign.status_code == 201
-    assigned_at = datetime.fromisoformat(
-        assign.json()["assigned_at"].replace("Z", "+00:00")
-    )
+    assigned_at = datetime.fromisoformat(assign.json()["assigned_at"].replace("Z", "+00:00"))
     assert assigned_at >= before

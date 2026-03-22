@@ -46,9 +46,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="MealMetric API")
 
     app.add_middleware(RequestIDMiddleware)
-    app.add_middleware(
-        InputSizeGuardMiddleware, max_request_bytes=settings.max_request_bytes
-    )
+    app.add_middleware(InputSizeGuardMiddleware, max_request_bytes=settings.max_request_bytes)
     app.add_middleware(RateLimiterMiddleware, rate_per_second=settings.rate_limit_rps)
     app.add_middleware(KillSwitchMiddleware, enabled=settings.kill_switch_enabled)
 

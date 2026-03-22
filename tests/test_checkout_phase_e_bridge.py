@@ -72,9 +72,7 @@ def test_checkout_service_seeds_payment_session(
     )
 
     user_id = uuid.uuid4()
-    result = service.create_checkout_session(
-        price_id="price_seed", quantity=1, user_id=user_id
-    )
+    result = service.create_checkout_session(price_id="price_seed", quantity=1, user_id=user_id)
 
     assert result.session_id == "cs_seed_123"
     assert captured == {
@@ -151,9 +149,7 @@ def test_checkout_service_rollback_on_persistence_error(
     )
 
     with pytest.raises(CheckoutPersistenceError):
-        service.create_checkout_session(
-            price_id="price_seed", quantity=1, user_id=uuid.uuid4()
-        )
+        service.create_checkout_session(price_id="price_seed", quantity=1, user_id=uuid.uuid4())
 
     assert fake_db.commit_count == 0
     assert fake_db.rollback_count == 1

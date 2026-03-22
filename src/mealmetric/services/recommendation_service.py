@@ -148,9 +148,7 @@ class MealPlanRecommendationService:
                 expires_at=expires_at,
             )
         except IntegrityError as exc:
-            raise RecommendationConflictError(
-                "meal_plan_recommendation_conflict"
-            ) from exc
+            raise RecommendationConflictError("meal_plan_recommendation_conflict") from exc
 
         audit_log_repo.append_event(
             self._session,
@@ -237,14 +235,10 @@ class MealPlanRecommendationService:
         self,
         recommendations: list[MealPlanRecommendation],
     ) -> MealPlanRecommendationListView:
-        items = tuple(
-            self._to_view(recommendation) for recommendation in recommendations
-        )
+        items = tuple(self._to_view(recommendation) for recommendation in recommendations)
         return MealPlanRecommendationListView(items=items, count=len(items))
 
-    def _to_view(
-        self, recommendation: MealPlanRecommendation
-    ) -> MealPlanRecommendationView:
+    def _to_view(self, recommendation: MealPlanRecommendation) -> MealPlanRecommendationView:
         meal_plan = recommendation.meal_plan
         summary = self._build_meal_plan_summary(meal_plan)
         currently_available = self._meal_plan_is_currently_available(meal_plan)
@@ -284,9 +278,7 @@ class MealPlanRecommendationService:
             display_name=profile.display_name if profile is not None else None,
         )
 
-    def _build_meal_plan_summary(
-        self, meal_plan: MealPlan
-    ) -> RecommendationMealPlanSummaryView:
+    def _build_meal_plan_summary(self, meal_plan: MealPlan) -> RecommendationMealPlanSummaryView:
         ordered_items = sorted(
             meal_plan.items,
             key=lambda item: (item.position, str(item.id)),
@@ -299,8 +291,7 @@ class MealPlanRecommendationService:
             item.vendor_menu_item.price_cents * item.quantity for item in ordered_items
         )
         total_calories = sum(
-            (item.vendor_menu_item.calories or 0) * item.quantity
-            for item in ordered_items
+            (item.vendor_menu_item.calories or 0) * item.quantity for item in ordered_items
         )
         return RecommendationMealPlanSummaryView(
             id=meal_plan.id,
@@ -319,9 +310,7 @@ class MealPlanRecommendationService:
         return any(
             availability.status in _AVAILABLE_AVAILABILITY_STATUSES
             and availability.pickup_window.status in _AVAILABLE_PICKUP_WINDOW_STATUSES
-            and (
-                availability.inventory_count is None or availability.inventory_count > 0
-            )
+            and (availability.inventory_count is None or availability.inventory_count > 0)
             for availability in meal_plan.availability_entries
         )
 
@@ -339,8 +328,7 @@ class MealPlanRecommendationService:
         if not meal_plan.items:
             return False
         if any(
-            item.vendor_menu_item.status != VendorMenuItemStatus.ACTIVE
-            for item in meal_plan.items
+            item.vendor_menu_item.status != VendorMenuItemStatus.ACTIVE for item in meal_plan.items
         ):
             return False
         return currently_available

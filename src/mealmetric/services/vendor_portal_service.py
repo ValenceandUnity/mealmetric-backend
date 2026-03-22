@@ -128,7 +128,9 @@ class VendorPortalService:
         current_user: User,
         vendor_id: uuid.UUID | None,
     ) -> uuid.UUID:
-        vendor_ids = vendor_membership_repo.list_vendor_ids_for_user(self._session, user_id=current_user.id)
+        vendor_ids = vendor_membership_repo.list_vendor_ids_for_user(
+            self._session, user_id=current_user.id
+        )
         if not vendor_ids:
             raise VendorPortalAccessError("vendor_membership_not_found")
         if vendor_id is None:

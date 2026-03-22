@@ -60,9 +60,7 @@ def _translate_service_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error"
-    )
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error")
 
 
 def _run_mutation[T](db: Session, operation: Callable[[], T]) -> T:

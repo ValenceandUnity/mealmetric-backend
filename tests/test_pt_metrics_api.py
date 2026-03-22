@@ -66,9 +66,7 @@ def pt_metrics_api_client(
     app.dependency_overrides.pop(get_db, None)
 
 
-def _register_headers(
-    client: TestClient, bff_headers: dict[str, str], role: str
-) -> dict[str, str]:
+def _register_headers(client: TestClient, bff_headers: dict[str, str], role: str) -> dict[str, str]:
     email = f"{role}-{uuid4()}@example.com"
     response = client.post(
         "/auth/register",
@@ -187,12 +185,8 @@ def test_pt_metrics_requires_active_link(
     bff_headers: dict[str, str],
 ) -> None:
     pt_headers = _register_headers(pt_metrics_api_client, bff_headers, "pt")
-    linked_client_headers = _register_headers(
-        pt_metrics_api_client, bff_headers, "client"
-    )
-    unlinked_client_headers = _register_headers(
-        pt_metrics_api_client, bff_headers, "client"
-    )
+    linked_client_headers = _register_headers(pt_metrics_api_client, bff_headers, "client")
+    unlinked_client_headers = _register_headers(pt_metrics_api_client, bff_headers, "client")
 
     _seed_pt_client_link(
         pt_metrics_api_client,
@@ -228,9 +222,7 @@ def test_pt_metrics_requires_active_link(
     )
     assert ended.status_code == 403
 
-    unlinked_client_id = _current_user_id(
-        pt_metrics_api_client, unlinked_client_headers
-    )
+    unlinked_client_id = _current_user_id(pt_metrics_api_client, unlinked_client_headers)
     unlinked = pt_metrics_api_client.get(
         f"/pt/clients/{unlinked_client_id}/metrics",
         params={"as_of_date": "2026-03-18"},

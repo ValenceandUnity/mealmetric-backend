@@ -35,7 +35,9 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 def _require_db(db: Session | None) -> Session:
     if db is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="db_unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="db_unavailable"
+        )
     return db
 
 
@@ -115,7 +117,9 @@ def create_bookmark_folder(
     return _folder_to_read(result)
 
 
-@router.post("/{folder_id}/items", response_model=BookmarkItemRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{folder_id}/items", response_model=BookmarkItemRead, status_code=status.HTTP_201_CREATED
+)
 def create_bookmark_item(
     folder_id: UUID,
     payload: BookmarkItemCreateRequest,

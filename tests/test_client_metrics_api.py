@@ -65,9 +65,7 @@ def client_metrics_api_client(
     app.dependency_overrides.pop(get_db, None)
 
 
-def _register_headers(
-    client: TestClient, bff_headers: dict[str, str], role: str
-) -> dict[str, str]:
+def _register_headers(client: TestClient, bff_headers: dict[str, str], role: str) -> dict[str, str]:
     email = f"{role}-{uuid4()}@example.com"
     response = client.post(
         "/auth/register",
@@ -135,9 +133,7 @@ def test_client_metrics_requires_signed_bff_and_auth(
     )
     assert missing_bff.status_code == 401
 
-    missing_jwt = client_metrics_api_client.get(
-        "/metrics/overview", headers=bff_headers
-    )
+    missing_jwt = client_metrics_api_client.get("/metrics/overview", headers=bff_headers)
     assert missing_jwt.status_code == 401
 
 
@@ -154,12 +150,8 @@ def test_client_metrics_self_only_visibility(
     client_metrics_api_client: TestClient,
     bff_headers: dict[str, str],
 ) -> None:
-    client1_headers = _register_headers(
-        client_metrics_api_client, bff_headers, "client"
-    )
-    client2_headers = _register_headers(
-        client_metrics_api_client, bff_headers, "client"
-    )
+    client1_headers = _register_headers(client_metrics_api_client, bff_headers, "client")
+    client2_headers = _register_headers(client_metrics_api_client, bff_headers, "client")
 
     _seed_client_week_records(
         client_metrics_api_client, client1_headers, calories=2200, expenditure=1800

@@ -100,6 +100,4 @@ def create_checkout_session(
             detail="Unable to persist checkout session.",
         ) from exc
 
-    return CheckoutSessionResponse(
-        checkout_url=result.checkout_url, session_id=result.session_id
-    )
+    return CheckoutSessionResponse(checkout_url=result.checkout_url, session_id=result.session_id)

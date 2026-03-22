@@ -34,9 +34,7 @@ def test_checkout_success_mocked(
         stripe_payment_intent_id: str | None = None,
         basket_snapshot: dict[str, object] | None = None,
     ) -> object:
-        captured_payment_session["stripe_checkout_session_id"] = (
-            stripe_checkout_session_id
-        )
+        captured_payment_session["stripe_checkout_session_id"] = stripe_checkout_session_id
         captured_payment_session["payment_status"] = payment_status
         captured_payment_session["user_id"] = user_id
         captured_payment_session["stripe_price_id"] = stripe_price_id
@@ -76,10 +74,7 @@ def test_checkout_success_mocked(
         "cancel_url": "https://example.com/cancel",
     }
     assert captured_payment_session["stripe_checkout_session_id"] == "cs_test_123"
-    assert (
-        captured_payment_session["payment_status"]
-        == PaymentStatus.CHECKOUT_SESSION_CREATED
-    )
+    assert captured_payment_session["payment_status"] == PaymentStatus.CHECKOUT_SESSION_CREATED
     assert captured_payment_session["stripe_price_id"] == "price_abc123"
     assert captured_payment_session["stripe_payment_intent_id"] == "pi_test_123"
     assert captured_payment_session["basket_snapshot"] == {

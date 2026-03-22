@@ -103,12 +103,8 @@ def _translate_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, TrainingPermissionError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     if isinstance(exc, TrainingValidationError):
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error"
-    )
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="internal_error")
 
 
 def _run_mutation[T](db: Session, operation: Callable[[], T]) -> T:
@@ -278,9 +274,7 @@ def _client_detail_to_read(view: PTClientDetailView) -> PTClientDetailRead:
             role=view.client.role,
             created_at=view.client.created_at,
         ),
-        current_assignments=[
-            _assignment_to_read(item) for item in view.current_assignments
-        ],
+        current_assignments=[_assignment_to_read(item) for item in view.current_assignments],
         assignments_count=len(view.current_assignments),
         metrics_snapshot=_overview_to_response(view.metrics_snapshot),
     )
@@ -292,9 +286,7 @@ def get_pt_profile_me(db: DBSessionDep, current_user: CurrentUserDep) -> PTProfi
     service = PtProfileService(session)
     profile = service.get_by_user_id(current_user.id)
     if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="pt_profile_not_found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pt_profile_not_found")
     return _profile_to_read(profile)
 
 
@@ -322,9 +314,7 @@ def update_pt_profile_me(
 
 
 @router.get("/clients", response_model=PTClientLinkListResponse)
-def list_pt_clients(
-    db: DBSessionDep, current_user: CurrentUserDep
-) -> PTClientLinkListResponse:
+def list_pt_clients(db: DBSessionDep, current_user: CurrentUserDep) -> PTClientLinkListResponse:
     session = _require_db(db)
     service = PtClientLinkService(session)
     links = service.list_for_pt(current_user.id)
@@ -386,9 +376,7 @@ def update_pt_client_link_status(
 
 
 @router.get("/folders", response_model=PTFolderListResponse)
-def list_pt_folders(
-    db: DBSessionDep, current_user: CurrentUserDep
-) -> PTFolderListResponse:
+def list_pt_folders(db: DBSessionDep, current_user: CurrentUserDep) -> PTFolderListResponse:
     session = _require_db(db)
     service = PtFolderService(session)
     folders = service.list_folders(current_user.id)
@@ -396,9 +384,7 @@ def list_pt_folders(
     return PTFolderListResponse(items=items, count=len(items))
 
 
-@router.post(
-    "/folders", response_model=PTFolderRead, status_code=status.HTTP_201_CREATED
-)
+@router.post("/folders", response_model=PTFolderRead, status_code=status.HTTP_201_CREATED)
 def create_pt_folder(
     payload: PTFolderCreateRequest,
     db: DBSessionDep,
@@ -443,9 +429,7 @@ def update_pt_folder(
 
 
 @router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_pt_folder(
-    folder_id: UUID, db: DBSessionDep, current_user: CurrentUserDep
-) -> Response:
+def delete_pt_folder(folder_id: UUID, db: DBSessionDep, current_user: CurrentUserDep) -> Response:
     session = _require_db(db)
     service = PtFolderService(session)
 
@@ -458,9 +442,7 @@ def delete_pt_folder(
 
 
 @router.get("/routines", response_model=RoutineListResponse)
-def list_pt_routines(
-    db: DBSessionDep, current_user: CurrentUserDep
-) -> RoutineListResponse:
+def list_pt_routines(db: DBSessionDep, current_user: CurrentUserDep) -> RoutineListResponse:
     session = _require_db(db)
     service = RoutineService(session)
     routines = service.list_routines(current_user.id)
@@ -469,9 +451,7 @@ def list_pt_routines(
 
 
 @router.get("/routines/{routine_id}", response_model=RoutineRead)
-def get_pt_routine(
-    routine_id: UUID, db: DBSessionDep, current_user: CurrentUserDep
-) -> RoutineRead:
+def get_pt_routine(routine_id: UUID, db: DBSessionDep, current_user: CurrentUserDep) -> RoutineRead:
     session = _require_db(db)
     service = RoutineService(session)
     try:
@@ -485,9 +465,7 @@ def get_pt_routine(
     return _routine_to_read(routine)
 
 
-@router.post(
-    "/routines", response_model=RoutineRead, status_code=status.HTTP_201_CREATED
-)
+@router.post("/routines", response_model=RoutineRead, status_code=status.HTTP_201_CREATED)
 def create_pt_routine(
     payload: RoutineCreateRequest,
     db: DBSessionDep,
@@ -545,24 +523,18 @@ def archive_pt_routine(
     service = RoutineService(session)
 
     def _operation() -> Routine:
-        return service.archive_routine(
-            pt_user_id=current_user.id, routine_id=routine_id
-        )
+        return service.archive_routine(pt_user_id=current_user.id, routine_id=routine_id)
 
     archived = _run_mutation(session, _operation)
     return _routine_to_read(archived)
 
 
 @router.get("/packages", response_model=TrainingPackageListResponse)
-def list_pt_packages(
-    db: DBSessionDep, current_user: CurrentUserDep
-) -> TrainingPackageListResponse:
+def list_pt_packages(db: DBSessionDep, current_user: CurrentUserDep) -> TrainingPackageListResponse:
     session = _require_db(db)
     service = TrainingPackageService(session)
     packages = service.list_training_packages(current_user.id)
-    items = [
-        _training_package_to_read(training_package) for training_package in packages
-    ]
+    items = [_training_package_to_read(training_package) for training_package in packages]
     return TrainingPackageListResponse(items=items, count=len(items))
 
 
@@ -586,9 +558,7 @@ def get_pt_package(
     return _training_package_to_read(training_package)
 
 
-@router.post(
-    "/packages", response_model=TrainingPackageRead, status_code=status.HTTP_201_CREATED
-)
+@router.post("/packages", response_model=TrainingPackageRead, status_code=status.HTTP_201_CREATED)
 def create_pt_package(
     payload: TrainingPackageCreateRequest,
     db: DBSessionDep,
@@ -657,9 +627,7 @@ def archive_pt_package(
     return _training_package_to_read(archived)
 
 
-@router.get(
-    "/packages/{package_id}/routines", response_model=PackageRoutineListResponse
-)
+@router.get("/packages/{package_id}/routines", response_model=PackageRoutineListResponse)
 def list_package_routines(
     package_id: UUID,
     db: DBSessionDep,
@@ -682,9 +650,7 @@ def list_package_routines(
     return PackageRoutineListResponse(items=items, count=len(items))
 
 
-@router.put(
-    "/packages/{package_id}/routines", response_model=PackageRoutineListResponse
-)
+@router.put("/packages/{package_id}/routines", response_model=PackageRoutineListResponse)
 def replace_package_routines(
     package_id: UUID,
     payload: PackageRoutineReplaceRequest,
@@ -713,9 +679,7 @@ def replace_package_routines(
     return PackageRoutineListResponse(items=items, count=len(items))
 
 
-@router.get(
-    "/packages/{package_id}/checklist", response_model=ChecklistItemListResponse
-)
+@router.get("/packages/{package_id}/checklist", response_model=ChecklistItemListResponse)
 def list_package_checklist(
     package_id: UUID,
     db: DBSessionDep,
@@ -738,9 +702,7 @@ def list_package_checklist(
     return ChecklistItemListResponse(items=items, count=len(items))
 
 
-@router.put(
-    "/packages/{package_id}/checklist", response_model=ChecklistItemListResponse
-)
+@router.put("/packages/{package_id}/checklist", response_model=ChecklistItemListResponse)
 def replace_package_checklist(
     package_id: UUID,
     payload: ChecklistReplaceRequest,
@@ -770,9 +732,7 @@ def replace_package_checklist(
     return ChecklistItemListResponse(items=items, count=len(items))
 
 
-@router.get(
-    "/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse
-)
+@router.get("/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse)
 def list_routine_checklist(
     routine_id: UUID,
     db: DBSessionDep,
@@ -795,9 +755,7 @@ def list_routine_checklist(
     return ChecklistItemListResponse(items=items, count=len(items))
 
 
-@router.put(
-    "/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse
-)
+@router.put("/routines/{routine_id}/checklist", response_model=ChecklistItemListResponse)
 def replace_routine_checklist(
     routine_id: UUID,
     payload: ChecklistReplaceRequest,
