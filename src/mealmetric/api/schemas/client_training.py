@@ -1,7 +1,8 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from mealmetric.models.training import (
     AssignmentStatus,
@@ -77,6 +78,7 @@ class ClientWorkoutLogRead(BaseModel):
     completion_status: WorkoutCompletionStatus
     client_notes: str | None
     pt_notes: str | None
+    exercise_entries: list["ClientWorkoutLogExerciseEntryRead"]
     created_at: datetime
     updated_at: datetime
 
@@ -93,3 +95,44 @@ class ClientWorkoutLogCreateRequest(BaseModel):
     duration_minutes: int | None = None
     completion_status: WorkoutCompletionStatus = WorkoutCompletionStatus.COMPLETED
     client_notes: str | None = None
+    exercise_entries: list["ClientWorkoutLogExerciseEntryCreateRequest"] = Field(
+        default_factory=list
+    )
+
+
+class ClientWorkoutLogExerciseEntryRead(BaseModel):
+    id: uuid.UUID
+    exercise_name: str | None
+    sets: int | None
+    reps: int | None
+    weight: Decimal | None
+    duration_seconds: int | None
+    notes: str | None
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClientWorkoutLogExerciseEntryCreateRequest(BaseModel):
+    exercise_name: str | None = None
+    sets: int | None = None
+    reps: int | None = None
+    weight: Decimal | None = None
+    duration_seconds: int | None = None
+    notes: str | None = None
+    position: int
+
+    @model_validator(mode="after")
+    def validate_meaningful_row(self) -> "ClientWorkoutLogExerciseEntryCreateRequest":
+        meaningful_text = bool(self.exercise_name and self.exercise_name.strip())
+        meaningful_notes = bool(self.notes and self.notes.strip())
+        if (
+            any(
+                value is not None
+                for value in (self.sets, self.reps, self.weight, self.duration_seconds)
+            )
+            or meaningful_text
+            or meaningful_notes
+        ):
+            return self
+        raise ValueError("exercise_entry_meaningful_field_required")

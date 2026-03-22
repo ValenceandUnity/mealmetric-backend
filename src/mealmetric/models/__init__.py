@@ -43,6 +43,7 @@ from mealmetric.models.training import (
     TrainingPackageStatus,
     WorkoutCompletionStatus,
     WorkoutLog,
+    WorkoutLogExerciseEntry,
 )
 from mealmetric.models.user import Role, User
 from mealmetric.models.user_role import UserRole
@@ -121,5 +122,6 @@ __all__ = [
     "WebhookProcessingStatus",
     "WeeklyMetricRollup",
     "WorkoutCompletionStatus",
+    "WorkoutLogExerciseEntry",
     "WorkoutLog",
 ]

@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -479,3 +481,60 @@ class WorkoutLog(Base):
         "ClientTrainingPackageAssignment", back_populates="workout_logs"
     )
     routine: Mapped["Routine | None"] = relationship("Routine", back_populates="workout_logs")
+    exercise_entries: Mapped[list["WorkoutLogExerciseEntry"]] = relationship(
+        "WorkoutLogExerciseEntry",
+        back_populates="workout_log",
+        cascade="all, delete-orphan",
+        order_by="WorkoutLogExerciseEntry.position.asc()",
+    )
+
+
+class WorkoutLogExerciseEntry(Base):
+    __tablename__ = "workout_log_exercise_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "workout_log_id",
+            "position",
+            name="uq_workout_log_exercise_entries_workout_log_id_position",
+        ),
+        CheckConstraint(
+            "position >= 0", name="ck_workout_log_exercise_entries_position_non_negative"
+        ),
+        CheckConstraint(
+            "sets IS NULL OR sets >= 0",
+            name="ck_workout_log_exercise_entries_sets_non_negative",
+        ),
+        CheckConstraint(
+            "reps IS NULL OR reps >= 0",
+            name="ck_workout_log_exercise_entries_reps_non_negative",
+        ),
+        CheckConstraint(
+            "duration_seconds IS NULL OR duration_seconds >= 0",
+            name="ck_workout_log_exercise_entries_duration_seconds_non_negative",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workout_log_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_logs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    exercise_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weight: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    workout_log: Mapped["WorkoutLog"] = relationship(
+        "WorkoutLog", back_populates="exercise_entries"
+    )

@@ -15,6 +15,7 @@ from mealmetric.api.schemas.client_training import (
     ClientAssignmentRoutineRead,
     ClientTrainingPackageSummary,
     ClientWorkoutLogCreateRequest,
+    ClientWorkoutLogExerciseEntryRead,
     ClientWorkoutLogListResponse,
     ClientWorkoutLogRead,
 )
@@ -33,6 +34,7 @@ from mealmetric.services.training_service import (
     TrainingNotFoundError,
     TrainingPermissionError,
     TrainingValidationError,
+    WorkoutLogExerciseEntryInput,
 )
 
 router = APIRouter(
@@ -141,6 +143,21 @@ def _to_workout_log_read(workout_log: WorkoutLog) -> ClientWorkoutLogRead:
         completion_status=workout_log.completion_status,
         client_notes=workout_log.client_notes,
         pt_notes=workout_log.pt_notes,
+        exercise_entries=[
+            ClientWorkoutLogExerciseEntryRead(
+                id=entry.id,
+                exercise_name=entry.exercise_name,
+                sets=entry.sets,
+                reps=entry.reps,
+                weight=entry.weight,
+                duration_seconds=entry.duration_seconds,
+                notes=entry.notes,
+                position=entry.position,
+                created_at=entry.created_at,
+                updated_at=entry.updated_at,
+            )
+            for entry in workout_log.exercise_entries
+        ],
         created_at=workout_log.created_at,
         updated_at=workout_log.updated_at,
     )
@@ -245,6 +262,18 @@ def create_client_workout_log(
             duration_minutes=payload.duration_minutes,
             completion_status=payload.completion_status,
             client_notes=payload.client_notes,
+            exercise_entries=[
+                WorkoutLogExerciseEntryInput(
+                    exercise_name=entry.exercise_name,
+                    sets=entry.sets,
+                    reps=entry.reps,
+                    weight=(str(entry.weight) if entry.weight is not None else None),
+                    duration_seconds=entry.duration_seconds,
+                    notes=entry.notes,
+                    position=entry.position,
+                )
+                for entry in payload.exercise_entries
+            ],
         )
 
     workout_log = _run_mutation(session, _operation)

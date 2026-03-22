@@ -66,6 +66,17 @@ class ChecklistItemInput:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkoutLogExerciseEntryInput:
+    exercise_name: str | None = None
+    sets: int | None = None
+    reps: int | None = None
+    weight: str | None = None
+    duration_seconds: int | None = None
+    notes: str | None = None
+    position: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class PTClientProfileView:
     id: uuid.UUID
     email: str
@@ -789,6 +800,7 @@ class ClientTrainingService:
         duration_minutes: int | None = None,
         completion_status: WorkoutCompletionStatus = WorkoutCompletionStatus.COMPLETED,
         client_notes: str | None = None,
+        exercise_entries: Sequence[WorkoutLogExerciseEntryInput] = (),
     ) -> WorkoutLog:
         if assignment_id is None and routine_id is None:
             raise TrainingValidationError("workout_log_anchor_required")
@@ -846,6 +858,7 @@ class ClientTrainingService:
             duration_minutes=duration_minutes,
             completion_status=completion_status,
             client_notes=client_notes,
+            exercise_entries=exercise_entries,
             pt_notes=None,
         )
         _AUDIT_LOGGER.info(
@@ -876,6 +889,7 @@ class WorkoutLogService:
         duration_minutes: int | None = None,
         completion_status: WorkoutCompletionStatus = WorkoutCompletionStatus.COMPLETED,
         client_notes: str | None = None,
+        exercise_entries: Sequence[WorkoutLogExerciseEntryInput] = (),
         pt_notes: str | None = None,
     ) -> WorkoutLog:
         if assignment_id is None and routine_id is None:
@@ -909,6 +923,7 @@ class WorkoutLogService:
             if routine.is_archived:
                 raise TrainingValidationError("routine_archived")
 
+        normalized_entries = self._normalize_exercise_entries(exercise_entries)
         logged_at = performed_at or datetime.now(UTC)
         workout_log = training_repo.create_workout_log(
             self._session,
@@ -920,6 +935,18 @@ class WorkoutLogService:
             duration_minutes=duration_minutes,
             completion_status=completion_status,
             client_notes=client_notes,
+            exercise_entries=[
+                (
+                    entry.exercise_name,
+                    entry.sets,
+                    entry.reps,
+                    entry.weight,
+                    entry.duration_seconds,
+                    entry.notes,
+                    entry.position,
+                )
+                for entry in normalized_entries
+            ],
             pt_notes=pt_notes,
         )
         _AUDIT_LOGGER.info(
@@ -958,3 +985,52 @@ class WorkoutLogService:
 
     def list_workout_logs_for_pt(self, pt_user_id: uuid.UUID) -> list[WorkoutLog]:
         return training_repo.list_workout_logs_for_pt(self._session, pt_user_id)
+
+    def _normalize_exercise_entries(
+        self,
+        exercise_entries: Sequence[WorkoutLogExerciseEntryInput],
+    ) -> list[WorkoutLogExerciseEntryInput]:
+        normalized: list[WorkoutLogExerciseEntryInput] = []
+        positions: set[int] = set()
+        for entry in exercise_entries:
+            exercise_name = entry.exercise_name.strip() if entry.exercise_name is not None else None
+            notes = entry.notes.strip() if entry.notes is not None else None
+
+            if entry.position in positions:
+                raise TrainingValidationError("duplicate_exercise_entry_positions")
+            positions.add(entry.position)
+
+            has_meaningful_value = (
+                any(
+                    value is not None
+                    for value in (entry.sets, entry.reps, entry.weight, entry.duration_seconds)
+                )
+                or bool(exercise_name)
+                or bool(notes)
+            )
+            if not has_meaningful_value:
+                raise TrainingValidationError("exercise_entry_meaningful_field_required")
+
+            if (
+                entry.sets is not None
+                and entry.sets < 0
+                or entry.reps is not None
+                and entry.reps < 0
+                or entry.duration_seconds is not None
+                and entry.duration_seconds < 0
+                or entry.position < 0
+            ):
+                raise TrainingValidationError("exercise_entry_negative_values_not_allowed")
+
+            normalized.append(
+                WorkoutLogExerciseEntryInput(
+                    exercise_name=exercise_name,
+                    sets=entry.sets,
+                    reps=entry.reps,
+                    weight=entry.weight,
+                    duration_seconds=entry.duration_seconds,
+                    notes=notes,
+                    position=entry.position,
+                )
+            )
+        return sorted(normalized, key=lambda item: item.position)

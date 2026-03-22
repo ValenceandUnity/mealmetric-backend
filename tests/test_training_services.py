@@ -27,6 +27,7 @@ from mealmetric.services.training_service import (
     TrainingPackageService,
     TrainingPermissionError,
     TrainingValidationError,
+    WorkoutLogExerciseEntryInput,
     WorkoutLogService,
 )
 
@@ -291,6 +292,78 @@ def test_workout_logs_are_scope_filtered() -> None:
             workout_service.list_workout_logs_for_client(
                 requester_user_id=pt2.id,
                 client_user_id=client.id,
+            )
+
+
+def test_workout_log_service_persists_structured_exercise_entries() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt = _create_user(db, email="pt-entries@example.com", role=Role.PT)
+        client = _create_user(db, email="client-entries@example.com", role=Role.CLIENT)
+
+        link_service = PtClientLinkService(db)
+        routine_service = RoutineService(db)
+        workout_service = WorkoutLogService(db)
+
+        link_service.create_link(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+        routine = routine_service.create_routine(pt_user_id=pt.id, title="R1")
+
+        workout_log = workout_service.create_workout_log(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            routine_id=routine.id,
+            performed_at=datetime(2026, 3, 16, 12, 0, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[
+                WorkoutLogExerciseEntryInput(
+                    exercise_name="Bench Press",
+                    sets=3,
+                    reps=10,
+                    weight="135.50",
+                    position=1,
+                ),
+                WorkoutLogExerciseEntryInput(
+                    duration_seconds=90,
+                    notes="Finisher",
+                    position=2,
+                ),
+            ],
+        )
+
+        assert len(workout_log.exercise_entries) == 2
+        assert workout_log.exercise_entries[0].exercise_name == "Bench Press"
+        assert str(workout_log.exercise_entries[0].weight) == "135.50"
+        assert workout_log.exercise_entries[1].duration_seconds == 90
+
+
+def test_workout_log_service_rejects_empty_structured_exercise_entry() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt = _create_user(db, email="pt-empty-entry@example.com", role=Role.PT)
+        client = _create_user(db, email="client-empty-entry@example.com", role=Role.CLIENT)
+
+        link_service = PtClientLinkService(db)
+        routine_service = RoutineService(db)
+        workout_service = WorkoutLogService(db)
+
+        link_service.create_link(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+        routine = routine_service.create_routine(pt_user_id=pt.id, title="R1")
+
+        with pytest.raises(TrainingValidationError):
+            workout_service.create_workout_log(
+                pt_user_id=pt.id,
+                client_user_id=client.id,
+                routine_id=routine.id,
+                completion_status=WorkoutCompletionStatus.COMPLETED,
+                exercise_entries=[WorkoutLogExerciseEntryInput(position=0)],
             )
 
 

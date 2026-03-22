@@ -1,9 +1,10 @@
 import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import Select, delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from mealmetric.models.training import (
     AssignmentStatus,
@@ -19,6 +20,7 @@ from mealmetric.models.training import (
     TrainingPackageStatus,
     WorkoutCompletionStatus,
     WorkoutLog,
+    WorkoutLogExerciseEntry,
 )
 
 
@@ -535,6 +537,9 @@ def create_workout_log(
     duration_minutes: int | None,
     completion_status: WorkoutCompletionStatus,
     client_notes: str | None,
+    exercise_entries: Sequence[
+        tuple[str | None, int | None, int | None, str | None, int | None, str | None, int]
+    ],
     pt_notes: str | None,
 ) -> WorkoutLog:
     workout_log = WorkoutLog(
@@ -550,12 +555,27 @@ def create_workout_log(
     )
     session.add(workout_log)
     session.flush()
+    for exercise_name, sets, reps, weight, duration_seconds, notes, position in exercise_entries:
+        session.add(
+            WorkoutLogExerciseEntry(
+                workout_log_id=workout_log.id,
+                exercise_name=exercise_name,
+                sets=sets,
+                reps=reps,
+                weight=Decimal(weight) if weight is not None else None,
+                duration_seconds=duration_seconds,
+                notes=notes,
+                position=position,
+            )
+        )
+    session.flush()
     return workout_log
 
 
 def list_workout_logs_for_client(session: Session, client_user_id: uuid.UUID) -> list[WorkoutLog]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
+        .options(selectinload(WorkoutLog.exercise_entries))
         .where(WorkoutLog.client_user_id == client_user_id)
         .order_by(
             WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
@@ -567,6 +587,7 @@ def list_workout_logs_for_client(session: Session, client_user_id: uuid.UUID) ->
 def list_workout_logs_for_pt(session: Session, pt_user_id: uuid.UUID) -> list[WorkoutLog]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
+        .options(selectinload(WorkoutLog.exercise_entries))
         .where(WorkoutLog.pt_user_id == pt_user_id)
         .order_by(
             WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
@@ -583,6 +604,7 @@ def list_workout_logs_for_pt_client(
 ) -> list[WorkoutLog]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
+        .options(selectinload(WorkoutLog.exercise_entries))
         .where(
             WorkoutLog.pt_user_id == pt_user_id,
             WorkoutLog.client_user_id == client_user_id,

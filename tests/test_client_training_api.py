@@ -240,6 +240,83 @@ def test_client_can_create_own_workout_log(
     payload = response.json()
     assert payload["client_user_id"] == str(client_user_id)
     assert payload["completion_status"] == "partial"
+    assert payload["exercise_entries"] == []
+
+
+def test_client_can_create_workout_log_with_structured_exercise_entries(
+    client_training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    pt_headers = _register_headers(client_training_api_client, bff_headers, "pt")
+    client_headers = _register_headers(client_training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(client_training_api_client, client_headers)
+    bundle = _seed_assignment_bundle(client_training_api_client, pt_headers, client_user_id)
+
+    response = client_training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "assignment_id": bundle["assignment_id"],
+            "routine_id": bundle["routine_id"],
+            "duration_minutes": 42,
+            "completion_status": "completed",
+            "client_notes": "legacy notes still allowed",
+            "exercise_entries": [
+                {
+                    "exercise_name": "Bench Press",
+                    "sets": 3,
+                    "reps": 10,
+                    "weight": "135.50",
+                    "position": 1,
+                },
+                {
+                    "duration_seconds": 90,
+                    "notes": "Bike finisher",
+                    "position": 2,
+                },
+            ],
+        },
+        headers=client_headers,
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["client_user_id"] == str(client_user_id)
+    assert payload["client_notes"] == "legacy notes still allowed"
+    assert len(payload["exercise_entries"]) == 2
+    assert payload["exercise_entries"][0]["exercise_name"] == "Bench Press"
+    assert payload["exercise_entries"][0]["weight"] == "135.50"
+    assert payload["exercise_entries"][1]["duration_seconds"] == 90
+
+    listed = client_training_api_client.get(
+        "/client/training/workout-logs",
+        headers=client_headers,
+    )
+    assert listed.status_code == 200
+    list_payload = listed.json()
+    assert list_payload["items"][0]["exercise_entries"][0]["position"] == 1
+    assert list_payload["items"][0]["exercise_entries"][1]["notes"] == "Bike finisher"
+
+
+def test_client_workout_log_rejects_empty_structured_exercise_entry_payload(
+    client_training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    pt_headers = _register_headers(client_training_api_client, bff_headers, "pt")
+    client_headers = _register_headers(client_training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(client_training_api_client, client_headers)
+    bundle = _seed_assignment_bundle(client_training_api_client, pt_headers, client_user_id)
+
+    response = client_training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "assignment_id": bundle["assignment_id"],
+            "routine_id": bundle["routine_id"],
+            "completion_status": "completed",
+            "exercise_entries": [{"position": 0}],
+        },
+        headers=client_headers,
+    )
+    assert response.status_code == 422
+    assert "exercise_entry_meaningful_field_required" in str(response.json())
 
 
 def test_client_cannot_create_workout_log_for_another_client(

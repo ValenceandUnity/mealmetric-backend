@@ -21,6 +21,7 @@ from mealmetric.models.training import (
     Routine,
     TrainingPackage,
     WorkoutLog,
+    WorkoutLogExerciseEntry,
 )
 from mealmetric.models.user import Role, User
 
@@ -63,15 +64,12 @@ def test_phase_h1_hardening_migration_lineage_and_upgrade_downgrade() -> None:
             "phase_h1_hardening",
         ),
     )
-
     assert hardening_module.down_revision == "8c0a5f7d2c19"
     assert base_module.down_revision == "0f2d3a91c6b4"
 
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
+        conn.execute(text("""
                 CREATE TABLE users (
                     id UUID NOT NULL PRIMARY KEY,
                     email VARCHAR NOT NULL,
@@ -79,9 +77,7 @@ def test_phase_h1_hardening_migration_lineage_and_upgrade_downgrade() -> None:
                     role VARCHAR NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
-        )
+                """))
 
         with Operations.context(MigrationContext.configure(conn)):
             base_module.upgrade()
@@ -111,6 +107,47 @@ def test_phase_h1_hardening_migration_lineage_and_upgrade_downgrade() -> None:
         assert expected_tables.isdisjoint(remaining_tables)
 
 
+def test_workout_log_exercise_entries_migration_lineage() -> None:
+    workout_entries_module = cast(
+        Any,
+        _load_migration_module(
+            "b8f9e3c7d4a1_add_workout_log_exercise_entries.py",
+            "phase_h1_workout_entries",
+        ),
+    )
+    assert workout_entries_module.down_revision == "6d1f8b42c3aa"
+
+
+def test_workout_log_exercise_entries_migration_upgrade_and_downgrade() -> None:
+    workout_entries_module = cast(
+        Any,
+        _load_migration_module(
+            "b8f9e3c7d4a1_add_workout_log_exercise_entries.py",
+            "phase_h1_workout_entries_upgrade",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(text("""
+                CREATE TABLE workout_logs (
+                    id UUID NOT NULL PRIMARY KEY
+                )
+                """))
+
+        with Operations.context(MigrationContext.configure(conn)):
+            workout_entries_module.upgrade()
+
+        inspector = sa.inspect(conn)
+        assert "workout_log_exercise_entries" in set(inspector.get_table_names())
+
+        with Operations.context(MigrationContext.configure(conn)):
+            workout_entries_module.downgrade()
+
+        remaining_tables = set(sa.inspect(conn).get_table_names())
+        assert "workout_log_exercise_entries" not in remaining_tables
+
+
 def test_training_tables_registered_in_metadata() -> None:
     expected_tables = {
         "pt_profiles",
@@ -122,6 +159,7 @@ def test_training_tables_registered_in_metadata() -> None:
         "checklist_items",
         "client_training_package_assignments",
         "workout_logs",
+        "workout_log_exercise_entries",
     }
     assert expected_tables.issubset(set(Base.metadata.tables))
 
@@ -213,6 +251,44 @@ def test_checklist_item_owner_constraint_still_enforced() -> None:
             position=2,
         )
         db.add(bad_item)
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+
+
+def test_workout_log_exercise_entry_position_uniqueness_is_enforced() -> None:
+    session_local = _build_sqlite_sessionmaker()
+
+    with session_local() as db:
+        pt = User(email="pt-entry@example.com", password_hash="hash", role=Role.PT)
+        client = User(email="client-entry@example.com", password_hash="hash", role=Role.CLIENT)
+        db.add_all([pt, client])
+        db.flush()
+
+        routine = Routine(pt_user_id=pt.id, title="Entry Routine")
+        db.add(routine)
+        db.flush()
+
+        workout_log = WorkoutLog(
+            client_user_id=client.id,
+            pt_user_id=pt.id,
+            performed_at=datetime(2026, 3, 16, 12, 0, tzinfo=UTC),
+            routine_id=routine.id,
+        )
+        db.add(workout_log)
+        db.flush()
+
+        db.add_all(
+            [
+                WorkoutLogExerciseEntry(
+                    workout_log_id=workout_log.id, exercise_name="Bench", position=0
+                ),
+                WorkoutLogExerciseEntry(
+                    workout_log_id=workout_log.id, exercise_name="Row", position=0
+                ),
+            ]
+        )
+
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
