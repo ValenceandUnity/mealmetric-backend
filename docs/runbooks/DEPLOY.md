@@ -7,12 +7,11 @@
    - `python -m pytest`
 2. Verify target DB revision:
    - `python tools/check_alembic_current.py`
-3. If DB is behind repo heads, run:
-   - `python -m alembic upgrade heads`
+3. If DB is behind repo head, run:
+   - `python -m alembic upgrade head`
    - Current workflow note:
-   - the migration graph currently has multiple heads
-   - local rebuilds and deployments should target all heads
-   - a future merge migration may return the repo to a single-head workflow
+   - the repository uses a no-op merge migration to keep Alembic on a single-head workflow
+   - if multiple heads appear again, create a future merge migration to restore a single-head workflow
 4. Start the backend with:
    - `python -m uvicorn mealmetric.core.app:create_app --factory`
 5. Verify probes:

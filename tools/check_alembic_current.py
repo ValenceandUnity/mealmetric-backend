@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
@@ -14,8 +16,12 @@ def _print(message: str) -> None:
     print(message, flush=True)
 
 
+def _base_dir() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
 def _load_database_url() -> str:
-    base_dir = Path(__file__).resolve().parents[1]
+    base_dir = _base_dir()
     load_dotenv(base_dir / ".env", override=False)
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
@@ -24,32 +30,11 @@ def _load_database_url() -> str:
 
 
 def _repo_heads() -> list[str]:
-    versions_dir = Path(__file__).resolve().parents[1] / "alembic" / "versions"
-    heads: set[str] = set()
-    for revision_file in versions_dir.glob("*.py"):
-        revision: str | None = None
-        down_revision: str | list[str] | tuple[str, ...] | None = None
-        namespace: dict[str, object] = {}
-        exec(revision_file.read_text(encoding="utf-8"), namespace)  # noqa: S102
-        raw_revision = namespace.get("revision")
-        raw_down_revision = namespace.get("down_revision")
-        if isinstance(raw_revision, str):
-            revision = raw_revision
-        if isinstance(raw_down_revision, str) or raw_down_revision is None:
-            down_revision = raw_down_revision
-        elif isinstance(raw_down_revision, (list, tuple)) and all(
-            isinstance(item, str) for item in raw_down_revision
-        ):
-            down_revision = list(raw_down_revision)
-        if revision is None:
-            continue
-        heads.add(revision)
-        if isinstance(down_revision, str):
-            heads.discard(down_revision)
-        elif isinstance(down_revision, list):
-            for item in down_revision:
-                heads.discard(item)
-    return sorted(heads)
+    base_dir = _base_dir()
+    config = Config(str(base_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(base_dir / "alembic"))
+    script = ScriptDirectory.from_config(config)
+    return sorted(script.get_heads())
 
 
 def _db_revisions(database_url: str) -> list[str]:
