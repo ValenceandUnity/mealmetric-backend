@@ -2,6 +2,7 @@ import importlib.util
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -19,6 +20,7 @@ from mealmetric.models.training import (
     PtClientLink,
     PtClientLinkStatus,
     PtFolder,
+    PtRosterCategory,
     Routine,
     TrainingPackage,
     TrainingPackageStatus,
@@ -262,10 +264,290 @@ def test_standalone_workout_logs_migration_upgrade_and_downgrade() -> None:
         assert "ck_workout_logs_assignment_or_routine_required" in downgraded_checks
 
 
+def test_pt_roster_categories_migration_lineage() -> None:
+    roster_module = cast(
+        Any,
+        _load_migration_module(
+            "9d4e5f6a7b8c_add_pt_roster_categories.py",
+            "phase_h1_pt_roster_categories",
+        ),
+    )
+    assert roster_module.down_revision == "7b3c4d5e6f7a"
+
+
+def test_pt_roster_categories_migration_upgrade_and_downgrade_without_data() -> None:
+    roster_module = cast(
+        Any,
+        _load_migration_module(
+            "9d4e5f6a7b8c_add_pt_roster_categories.py",
+            "phase_h1_pt_roster_categories_upgrade",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id UUID NOT NULL PRIMARY KEY,
+                    email VARCHAR NOT NULL,
+                    password_hash VARCHAR NOT NULL,
+                    role VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE pt_client_links (
+                    id UUID NOT NULL PRIMARY KEY,
+                    pt_user_id UUID NOT NULL,
+                    client_user_id UUID NOT NULL,
+                    status VARCHAR NOT NULL,
+                    started_at DATETIME NULL,
+                    ended_at DATETIME NULL,
+                    notes VARCHAR NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            roster_module.upgrade()
+
+        inspector = sa.inspect(conn)
+        assert "pt_roster_categories" in set(inspector.get_table_names())
+        upgraded_columns = {
+            column["name"] for column in inspector.get_columns("pt_client_links")
+        }
+        assert "roster_category_id" in upgraded_columns
+
+        with Operations.context(MigrationContext.configure(conn)):
+            roster_module.downgrade()
+
+        remaining_tables = set(sa.inspect(conn).get_table_names())
+        assert "pt_roster_categories" not in remaining_tables
+        downgraded_columns = {
+            column["name"] for column in sa.inspect(conn).get_columns("pt_client_links")
+        }
+        assert "roster_category_id" not in downgraded_columns
+
+
+def test_pt_roster_categories_migration_downgrade_refuses_with_category_rows() -> None:
+    roster_module = cast(
+        Any,
+        _load_migration_module(
+            "9d4e5f6a7b8c_add_pt_roster_categories.py",
+            "phase_h1_pt_roster_categories_guard_category",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id UUID NOT NULL PRIMARY KEY,
+                    email VARCHAR NOT NULL,
+                    password_hash VARCHAR NOT NULL,
+                    role VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE pt_client_links (
+                    id UUID NOT NULL PRIMARY KEY,
+                    pt_user_id UUID NOT NULL,
+                    client_user_id UUID NOT NULL,
+                    status VARCHAR NOT NULL,
+                    started_at DATETIME NULL,
+                    ended_at DATETIME NULL,
+                    notes VARCHAR NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            roster_module.upgrade()
+
+        pt_id = str(uuid4())
+        conn.execute(
+            text(
+                """
+                INSERT INTO users (id, email, password_hash, role)
+                VALUES (:id, :email, :password_hash, :role)
+                """
+            ),
+            {
+                "id": pt_id,
+                "email": "pt-roster-guard@example.com",
+                "password_hash": "hash",
+                "role": "pt",
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO pt_roster_categories (id, pt_user_id, name)
+                VALUES (:id, :pt_user_id, :name)
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "pt_user_id": pt_id,
+                "name": "Strength",
+            },
+        )
+
+        with (
+            Operations.context(MigrationContext.configure(conn)),
+            pytest.raises(
+                RuntimeError,
+                match="Cannot downgrade roster categories while roster category data or assignments exist.",
+            ),
+        ):
+            roster_module.downgrade()
+
+
+def test_pt_roster_categories_migration_downgrade_refuses_with_assignments() -> None:
+    roster_module = cast(
+        Any,
+        _load_migration_module(
+            "9d4e5f6a7b8c_add_pt_roster_categories.py",
+            "phase_h1_pt_roster_categories_guard_assignment",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id UUID NOT NULL PRIMARY KEY,
+                    email VARCHAR NOT NULL,
+                    password_hash VARCHAR NOT NULL,
+                    role VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE pt_client_links (
+                    id UUID NOT NULL PRIMARY KEY,
+                    pt_user_id UUID NOT NULL,
+                    client_user_id UUID NOT NULL,
+                    status VARCHAR NOT NULL,
+                    started_at DATETIME NULL,
+                    ended_at DATETIME NULL,
+                    notes VARCHAR NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            roster_module.upgrade()
+
+        pt_id = str(uuid4())
+        client_id = str(uuid4())
+        category_id = str(uuid4())
+        conn.execute(
+            text(
+                """
+                INSERT INTO users (id, email, password_hash, role)
+                VALUES (:id, :email, :password_hash, :role)
+                """
+            ),
+            [
+                {
+                    "id": pt_id,
+                    "email": "pt-roster-assignment@example.com",
+                    "password_hash": "hash",
+                    "role": "pt",
+                },
+                {
+                    "id": client_id,
+                    "email": "client-roster-assignment@example.com",
+                    "password_hash": "hash",
+                    "role": "client",
+                },
+            ],
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO pt_roster_categories (id, pt_user_id, name)
+                VALUES (:id, :pt_user_id, :name)
+                """
+            ),
+            {
+                "id": category_id,
+                "pt_user_id": pt_id,
+                "name": "Conditioning",
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO pt_client_links (
+                    id,
+                    pt_user_id,
+                    client_user_id,
+                    roster_category_id,
+                    status
+                )
+                VALUES (
+                    :id,
+                    :pt_user_id,
+                    :client_user_id,
+                    :roster_category_id,
+                    :status
+                )
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "pt_user_id": pt_id,
+                "client_user_id": client_id,
+                "roster_category_id": category_id,
+                "status": PtClientLinkStatus.ACTIVE.value,
+            },
+        )
+
+        with (
+            Operations.context(MigrationContext.configure(conn)),
+            pytest.raises(
+                RuntimeError,
+                match="Cannot downgrade roster categories while roster category data or assignments exist.",
+            ),
+        ):
+            roster_module.downgrade()
+
+
 def test_training_tables_registered_in_metadata() -> None:
     expected_tables = {
         "pt_profiles",
         "pt_client_links",
+        "pt_roster_categories",
         "pt_folders",
         "routines",
         "training_packages",
@@ -290,6 +572,16 @@ def test_training_enums_persist_lowercase_values() -> None:
     assert WorkoutLog.__table__.c.completion_status.type.enums == [
         status.value for status in WorkoutCompletionStatus
     ]
+
+
+def test_pt_roster_category_relationship_columns_registered() -> None:
+    roster_category_columns = set(PtRosterCategory.__table__.c.keys())
+    link_columns = set(PtClientLink.__table__.c.keys())
+
+    assert {"id", "pt_user_id", "name", "created_at", "updated_at"}.issubset(
+        roster_category_columns
+    )
+    assert "roster_category_id" in link_columns
 
 
 def test_mismatched_pt_client_assignment_rejected() -> None:

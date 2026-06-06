@@ -159,6 +159,91 @@ def test_pt_client_links_create_list_update(
     assert patch_response.json()["status"] == "active"
 
 
+def test_pt_roster_categories_list_create_assign_and_filter_clients(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt1_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    pt2_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client1_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client2_headers = _headers_for_role(training_api_client, bff_headers, "client")
+
+    client1_id = _current_user_id(training_api_client, client1_headers)
+    client2_id = _current_user_id(training_api_client, client2_headers)
+
+    link1_response = training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client1_id), "status": "active"},
+        headers=pt1_headers,
+    )
+    assert link1_response.status_code == 201
+
+    link2_response = training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(client2_id), "status": "active"},
+        headers=pt1_headers,
+    )
+    assert link2_response.status_code == 201
+
+    create_category_response = training_api_client.post(
+        "/pt/roster-categories",
+        json={"name": "Strength Focus"},
+        headers=pt1_headers,
+    )
+    assert create_category_response.status_code == 201
+    category_id = create_category_response.json()["id"]
+
+    list_categories_response = training_api_client.get(
+        "/pt/roster-categories",
+        headers=pt1_headers,
+    )
+    assert list_categories_response.status_code == 200
+    assert list_categories_response.json()["count"] == 1
+    assert list_categories_response.json()["items"][0]["name"] == "Strength Focus"
+
+    assign_category_response = training_api_client.patch(
+        f"/pt/clients/{client1_id}/roster-category",
+        json={"roster_category_id": category_id},
+        headers=pt1_headers,
+    )
+    assert assign_category_response.status_code == 200
+    assert assign_category_response.json()["client_user_id"] == str(client1_id)
+    assert assign_category_response.json()["client_name"] == assign_category_response.json()["client_email"]
+    assert assign_category_response.json()["roster_name"] == "Strength Focus"
+
+    all_clients_response = training_api_client.get("/pt/clients", headers=pt1_headers)
+    assert all_clients_response.status_code == 200
+    assert all_clients_response.json()["count"] == 2
+    assert all(
+        "client_name" in item and "client_email" in item and "roster_name" in item
+        for item in all_clients_response.json()["items"]
+    )
+    assert any(
+        item["client_user_id"] == str(client1_id) and item["roster_name"] == "Strength Focus"
+        for item in all_clients_response.json()["items"]
+    )
+    assert any(
+        item["client_user_id"] == str(client2_id) and item["roster_name"] is None
+        for item in all_clients_response.json()["items"]
+    )
+
+    filtered_clients_response = training_api_client.get(
+        "/pt/clients",
+        params={"category_id": category_id},
+        headers=pt1_headers,
+    )
+    assert filtered_clients_response.status_code == 200
+    assert filtered_clients_response.json()["count"] == 1
+    assert filtered_clients_response.json()["items"][0]["client_user_id"] == str(client1_id)
+    assert filtered_clients_response.json()["items"][0]["roster_name"] == "Strength Focus"
+
+    cross_pt_category_list = training_api_client.get(
+        "/pt/clients",
+        params={"category_id": category_id},
+        headers=pt2_headers,
+    )
+    assert cross_pt_category_list.status_code == 404
+    assert cross_pt_category_list.json() == {"detail": "pt_roster_category_not_found"}
+
 def test_pt_client_detail_returns_profile_assignments_and_metrics(
     training_api_client: TestClient, bff_headers: dict[str, str]
 ) -> None:
@@ -911,6 +996,18 @@ def test_pt_routes_preserve_auth_behavior(
 
     no_bff = training_api_client.get("/pt/folders")
     assert no_bff.status_code == 401
+
+
+def test_pt_roster_category_routes_preserve_auth_behavior(
+    training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    no_auth = training_api_client.get("/pt/roster-categories", headers=bff_headers)
+    assert no_auth.status_code == 401
+
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_forbidden = training_api_client.get("/pt/roster-categories", headers=client_headers)
+    assert client_forbidden.status_code == 403
 
 
 def test_pt_profile_not_found_until_created(

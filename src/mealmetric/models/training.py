@@ -122,6 +122,12 @@ class PtClientLink(Base):
         nullable=False,
         index=True,
     )
+    roster_category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pt_roster_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[PtClientLinkStatus] = mapped_column(
         Enum(
             PtClientLinkStatus,
@@ -147,6 +153,41 @@ class PtClientLink(Base):
     assignments: Mapped[list["ClientTrainingPackageAssignment"]] = relationship(
         "ClientTrainingPackageAssignment",
         back_populates="pt_client_link",
+    )
+    roster_category: Mapped["PtRosterCategory | None"] = relationship(
+        "PtRosterCategory",
+        back_populates="client_links",
+    )
+
+
+class PtRosterCategory(Base):
+    __tablename__ = "pt_roster_categories"
+    __table_args__ = (
+        UniqueConstraint(
+            "pt_user_id",
+            "name",
+            name="uq_pt_roster_categories_pt_user_id_name",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pt_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    client_links: Mapped[list["PtClientLink"]] = relationship(
+        "PtClientLink",
+        back_populates="roster_category",
     )
 
 

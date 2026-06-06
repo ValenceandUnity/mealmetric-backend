@@ -23,6 +23,7 @@ from mealmetric.services.training_service import (
     PtClientLinkService,
     PtFolderService,
     PtProfileService,
+    PtRosterCategoryService,
     RoutineService,
     TrainingConflictError,
     TrainingNotFoundError,
@@ -80,6 +81,47 @@ def test_pt_client_duplicate_prevention() -> None:
 
         with pytest.raises(TrainingConflictError):
             service.create_link(pt_user_id=pt.id, client_user_id=client.id)
+
+
+def test_pt_roster_category_assignment_and_scope() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt1 = _create_user(db, email="pt-roster-1@example.com", role=Role.PT)
+        pt2 = _create_user(db, email="pt-roster-2@example.com", role=Role.PT)
+        client = _create_user(db, email="client-roster@example.com", role=Role.CLIENT)
+
+        link_service = PtClientLinkService(db)
+        roster_service = PtRosterCategoryService(db)
+
+        link_service.create_link(
+            pt_user_id=pt1.id,
+            client_user_id=client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+        category = roster_service.create_category(pt_user_id=pt1.id, name="Strength")
+
+        updated = link_service.update_roster_category(
+            pt_user_id=pt1.id,
+            client_user_id=client.id,
+            roster_category_id=category.id,
+        )
+        assert updated.link.roster_category_id == category.id
+        assert updated.roster_name == "Strength"
+        assert updated.client_email == "client-roster@example.com"
+
+        filtered = link_service.list_roster_clients(
+            pt1.id,
+            roster_category_id=category.id,
+        )
+        assert len(filtered) == 1
+        assert filtered[0].link.client_user_id == client.id
+
+        with pytest.raises(TrainingNotFoundError):
+            link_service.update_roster_category(
+                pt_user_id=pt2.id,
+                client_user_id=client.id,
+                roster_category_id=category.id,
+            )
 
 
 def test_pt_cannot_operate_on_other_pt_folder_routine_or_package() -> None:

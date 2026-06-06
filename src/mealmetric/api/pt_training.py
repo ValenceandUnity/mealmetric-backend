@@ -37,6 +37,7 @@ from mealmetric.api.schemas.training import (
     PTClientLinkRead,
     PTClientLinkStatusUpdateRequest,
     PTClientProfileRead,
+    PTClientRosterCategoryUpdateRequest,
     PTDashboardClientSummaryListResponse,
     PTDashboardClientSummaryRead,
     PTFolderCreateRequest,
@@ -45,6 +46,11 @@ from mealmetric.api.schemas.training import (
     PTFolderUpdateRequest,
     PTProfileRead,
     PTProfileUpdateRequest,
+    PTRosterCategoryCreateRequest,
+    PTRosterCategoryListResponse,
+    PTRosterCategoryRead,
+    PTRosterClientListResponse,
+    PTRosterClientRead,
     PTWorkoutLogNotesUpdateRequest,
     RoutineCreateRequest,
     RoutineListResponse,
@@ -62,6 +68,7 @@ from mealmetric.models.training import (
     PtClientLink,
     PtFolder,
     PtProfile,
+    PtRosterCategory,
     Routine,
     TrainingPackage,
     TrainingPackageRoutine,
@@ -79,6 +86,9 @@ from mealmetric.services.training_service import (
     PTDashboardClientSummaryView,
     PtFolderService,
     PtProfileService,
+    PtRosterCategoryService,
+    PTRosterCategoryView,
+    PTRosterClientView,
     RoutineService,
     TrainingConflictError,
     TrainingNotFoundError,
@@ -153,12 +163,38 @@ def _client_link_to_read(link: PtClientLink) -> PTClientLinkRead:
         id=link.id,
         pt_user_id=link.pt_user_id,
         client_user_id=link.client_user_id,
+        roster_category_id=link.roster_category_id,
         status=link.status,
         started_at=link.started_at,
         ended_at=link.ended_at,
         notes=link.notes,
         created_at=link.created_at,
         updated_at=link.updated_at,
+    )
+
+
+def _roster_category_to_read(category: PtRosterCategory | PTRosterCategoryView) -> PTRosterCategoryRead:
+    return PTRosterCategoryRead(
+        id=category.id,
+        pt_user_id=category.pt_user_id,
+        name=category.name,
+        created_at=category.created_at,
+        updated_at=category.updated_at,
+    )
+
+
+def _roster_client_to_read(view: PTRosterClientView) -> PTRosterClientRead:
+    return PTRosterClientRead(
+        id=view.link.id,
+        pt_user_id=view.link.pt_user_id,
+        client_user_id=view.link.client_user_id,
+        status=view.link.status,
+        client_name=view.client_name,
+        client_email=view.client_email,
+        roster_category_id=view.link.roster_category_id,
+        roster_name=view.roster_name,
+        created_at=view.link.created_at,
+        updated_at=view.link.updated_at,
     )
 
 
@@ -389,13 +425,27 @@ def update_pt_profile_me(
     return _profile_to_read(updated)
 
 
-@router.get("/clients", response_model=PTClientLinkListResponse)
-def list_pt_clients(db: DBSessionDep, current_user: CurrentUserDep) -> PTClientLinkListResponse:
+@router.get("/clients", response_model=PTRosterClientListResponse)
+def list_pt_clients(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+    category_id: UUID | None = None,
+) -> PTRosterClientListResponse:
     session = _require_db(db)
     service = PtClientLinkService(session)
-    links = service.list_for_pt(current_user.id)
-    items = [_client_link_to_read(link) for link in links]
-    return PTClientLinkListResponse(items=items, count=len(items))
+    try:
+        clients = service.list_roster_clients(
+            current_user.id,
+            roster_category_id=category_id,
+        )
+    except (
+        TrainingNotFoundError,
+        TrainingPermissionError,
+        TrainingValidationError,
+    ) as exc:
+        raise _translate_service_error(exc) from exc
+    items = [_roster_client_to_read(client) for client in clients]
+    return PTRosterClientListResponse(items=items, count=len(items))
 
 
 @router.get("/dashboard", response_model=PTDashboardClientSummaryListResponse)
@@ -414,7 +464,11 @@ def list_pt_dashboard_clients(
 def list_pt_client_links(
     db: DBSessionDep, current_user: CurrentUserDep
 ) -> PTClientLinkListResponse:
-    return list_pt_clients(db=db, current_user=current_user)
+    session = _require_db(db)
+    service = PtClientLinkService(session)
+    links = service.list_for_pt(current_user.id)
+    items = [_client_link_to_read(link) for link in links]
+    return PTClientLinkListResponse(items=items, count=len(items))
 
 
 @router.post(
@@ -461,6 +515,65 @@ def update_pt_client_link_status(
 
     updated = _run_mutation(session, _operation)
     return _client_link_to_read(updated)
+
+
+@router.get("/roster-categories", response_model=PTRosterCategoryListResponse)
+def list_pt_roster_categories(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> PTRosterCategoryListResponse:
+    session = _require_db(db)
+    service = PtRosterCategoryService(session)
+    categories = service.list_categories(current_user.id)
+    items = [_roster_category_to_read(category) for category in categories]
+    return PTRosterCategoryListResponse(items=items, count=len(items))
+
+
+@router.post(
+    "/roster-categories",
+    response_model=PTRosterCategoryRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_pt_roster_category(
+    payload: PTRosterCategoryCreateRequest,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> PTRosterCategoryRead:
+    session = _require_db(db)
+    service = PtRosterCategoryService(session)
+
+    def _operation() -> PtRosterCategory:
+        return service.create_category(
+            pt_user_id=current_user.id,
+            name=payload.name,
+        )
+
+    created = _run_mutation(session, _operation)
+    return _roster_category_to_read(created)
+
+
+@router.patch(
+    "/clients/{client_user_id}/roster-category",
+    response_model=PTRosterClientRead,
+)
+def update_pt_client_roster_category(
+    client_user_id: UUID,
+    payload: PTClientRosterCategoryUpdateRequest,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> PTRosterClientRead:
+    session = _require_db(db)
+    service = PtClientLinkService(session)
+
+    def _operation() -> PTRosterClientView:
+        return service.update_roster_category(
+            pt_user_id=current_user.id,
+            client_user_id=client_user_id,
+            roster_category_id=payload.roster_category_id,
+        )
+
+    updated = _run_mutation(session, _operation)
+    return _roster_client_to_read(updated)
 
 
 @router.get("/folders", response_model=PTFolderListResponse)

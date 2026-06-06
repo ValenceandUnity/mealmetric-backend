@@ -35,6 +35,7 @@ class PTClientLinkRead(BaseModel):
     id: uuid.UUID
     pt_user_id: uuid.UUID
     client_user_id: uuid.UUID
+    roster_category_id: uuid.UUID | None
     status: PtClientLinkStatus
     started_at: datetime | None
     ended_at: datetime | None
@@ -92,6 +93,45 @@ class PTClientLinkCreateRequest(BaseModel):
 
 class PTClientLinkStatusUpdateRequest(BaseModel):
     status: PtClientLinkStatus
+
+
+class PTRosterCategoryRead(BaseModel):
+    id: uuid.UUID
+    pt_user_id: uuid.UUID
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PTRosterCategoryListResponse(BaseModel):
+    items: list[PTRosterCategoryRead]
+    count: int
+
+
+class PTRosterCategoryCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class PTRosterClientRead(BaseModel):
+    id: uuid.UUID
+    pt_user_id: uuid.UUID
+    client_user_id: uuid.UUID
+    status: PtClientLinkStatus
+    client_name: str
+    client_email: str
+    roster_category_id: uuid.UUID | None
+    roster_name: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PTRosterClientListResponse(BaseModel):
+    items: list[PTRosterClientRead]
+    count: int
+
+
+class PTClientRosterCategoryUpdateRequest(BaseModel):
+    roster_category_id: uuid.UUID | None = None
 
 
 class PTFolderRead(BaseModel):

@@ -15,6 +15,7 @@ from mealmetric.models.training import (
     PtClientLinkStatus,
     PtFolder,
     PtProfile,
+    PtRosterCategory,
     Routine,
     TrainingPackage,
     TrainingPackageRoutine,
@@ -100,6 +101,23 @@ def list_pt_client_links_for_pt(session: Session, pt_user_id: uuid.UUID) -> list
     return list(session.scalars(stmt))
 
 
+def list_pt_roster_client_links_for_pt(
+    session: Session,
+    *,
+    pt_user_id: uuid.UUID,
+    roster_category_id: uuid.UUID | None = None,
+) -> list[PtClientLink]:
+    stmt: Select[tuple[PtClientLink]] = (
+        select(PtClientLink)
+        .options(selectinload(PtClientLink.roster_category))
+        .where(PtClientLink.pt_user_id == pt_user_id)
+    )
+    if roster_category_id is not None:
+        stmt = stmt.where(PtClientLink.roster_category_id == roster_category_id)
+    stmt = stmt.order_by(PtClientLink.created_at.desc(), PtClientLink.id.desc())
+    return list(session.scalars(stmt))
+
+
 def list_pt_client_links_for_client(
     session: Session, client_user_id: uuid.UUID
 ) -> list[PtClientLink]:
@@ -116,12 +134,14 @@ def create_pt_client_link(
     *,
     pt_user_id: uuid.UUID,
     client_user_id: uuid.UUID,
+    roster_category_id: uuid.UUID | None,
     status: PtClientLinkStatus,
     notes: str | None,
 ) -> PtClientLink:
     link = PtClientLink(
         pt_user_id=pt_user_id,
         client_user_id=client_user_id,
+        roster_category_id=roster_category_id,
         status=status,
         notes=notes,
     )
@@ -134,6 +154,52 @@ def save_pt_client_link(session: Session, link: PtClientLink) -> PtClientLink:
     session.add(link)
     session.flush()
     return link
+
+
+def create_pt_roster_category(
+    session: Session,
+    *,
+    pt_user_id: uuid.UUID,
+    name: str,
+) -> PtRosterCategory:
+    category = PtRosterCategory(
+        pt_user_id=pt_user_id,
+        name=name,
+    )
+    session.add(category)
+    session.flush()
+    return category
+
+
+def get_pt_roster_category_for_pt(
+    session: Session,
+    *,
+    category_id: uuid.UUID,
+    pt_user_id: uuid.UUID,
+) -> PtRosterCategory | None:
+    stmt: Select[tuple[PtRosterCategory]] = select(PtRosterCategory).where(
+        PtRosterCategory.id == category_id,
+        PtRosterCategory.pt_user_id == pt_user_id,
+    )
+    return session.scalar(stmt)
+
+
+def list_pt_roster_categories_for_pt(
+    session: Session,
+    pt_user_id: uuid.UUID,
+) -> list[PtRosterCategory]:
+    stmt: Select[tuple[PtRosterCategory]] = (
+        select(PtRosterCategory)
+        .where(PtRosterCategory.pt_user_id == pt_user_id)
+        .order_by(PtRosterCategory.created_at.asc(), PtRosterCategory.id.asc())
+    )
+    return list(session.scalars(stmt))
+
+
+def save_pt_roster_category(session: Session, category: PtRosterCategory) -> PtRosterCategory:
+    session.add(category)
+    session.flush()
+    return category
 
 
 def create_pt_folder(

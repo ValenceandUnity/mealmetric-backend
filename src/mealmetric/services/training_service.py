@@ -16,6 +16,7 @@ from mealmetric.models.training import (
     PtClientLinkStatus,
     PtFolder,
     PtProfile,
+    PtRosterCategory,
     Routine,
     TrainingPackage,
     TrainingPackageRoutine,
@@ -124,6 +125,23 @@ class PTDashboardClientSummaryView:
     metrics_snapshot: OverviewMetricsView | None
 
 
+@dataclass(frozen=True, slots=True)
+class PTRosterCategoryView:
+    id: uuid.UUID
+    pt_user_id: uuid.UUID
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PTRosterClientView:
+    link: PtClientLink
+    client_name: str
+    client_email: str
+    roster_name: str | None
+
+
 class PtProfileService:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -187,6 +205,7 @@ class PtClientLinkService:
         *,
         pt_user_id: uuid.UUID,
         client_user_id: uuid.UUID,
+        roster_category_id: uuid.UUID | None = None,
         status: PtClientLinkStatus = PtClientLinkStatus.PENDING,
         notes: str | None = None,
     ) -> PtClientLink:
@@ -197,11 +216,17 @@ class PtClientLinkService:
         )
         if existing is not None:
             raise TrainingConflictError("pt_client_link_already_exists")
+        if roster_category_id is not None:
+            self._require_roster_category(
+                pt_user_id=pt_user_id,
+                roster_category_id=roster_category_id,
+            )
         try:
             return training_repo.create_pt_client_link(
                 self._session,
                 pt_user_id=pt_user_id,
                 client_user_id=client_user_id,
+                roster_category_id=roster_category_id,
                 status=status,
                 notes=notes,
             )
@@ -210,6 +235,29 @@ class PtClientLinkService:
 
     def list_for_pt(self, pt_user_id: uuid.UUID) -> list[PtClientLink]:
         return training_repo.list_pt_client_links_for_pt(self._session, pt_user_id)
+
+    def list_roster_clients(
+        self,
+        pt_user_id: uuid.UUID,
+        *,
+        roster_category_id: uuid.UUID | None = None,
+    ) -> list[PTRosterClientView]:
+        if roster_category_id is not None:
+            self._require_roster_category(
+                pt_user_id=pt_user_id,
+                roster_category_id=roster_category_id,
+            )
+
+        views: list[PTRosterClientView] = []
+        for link in training_repo.list_pt_roster_client_links_for_pt(
+            self._session,
+            pt_user_id=pt_user_id,
+            roster_category_id=roster_category_id,
+        ):
+            client_view = self._build_roster_client_view(link)
+            if client_view is not None:
+                views.append(client_view)
+        return views
 
     def list_dashboard_clients(self, pt_user_id: uuid.UUID) -> list[PTDashboardClientSummaryView]:
         summaries: list[PTDashboardClientSummaryView] = []
@@ -278,6 +326,38 @@ class PtClientLinkService:
         link.status = status
         return training_repo.save_pt_client_link(self._session, link)
 
+    def update_roster_category(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        client_user_id: uuid.UUID,
+        roster_category_id: uuid.UUID | None,
+    ) -> PTRosterClientView:
+        link = training_repo.get_pt_client_link_by_pair(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=client_user_id,
+        )
+        if link is None:
+            raise TrainingNotFoundError("pt_client_link_not_found")
+
+        if roster_category_id is not None:
+            category = self._require_roster_category(
+                pt_user_id=pt_user_id,
+                roster_category_id=roster_category_id,
+            )
+            link.roster_category_id = category.id
+            link.roster_category = category
+        else:
+            link.roster_category_id = None
+            link.roster_category = None
+
+        updated = training_repo.save_pt_client_link(self._session, link)
+        client_view = self._build_roster_client_view(updated)
+        if client_view is None:
+            raise TrainingValidationError("pt_client_user_not_found")
+        return client_view
+
     def get_client_detail(
         self,
         *,
@@ -319,6 +399,59 @@ class PtClientLinkService:
             current_assignments=tuple(assignments),
             metrics_snapshot=metrics_snapshot,
         )
+
+    def _require_roster_category(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        roster_category_id: uuid.UUID,
+    ) -> PtRosterCategory:
+        category = training_repo.get_pt_roster_category_for_pt(
+            self._session,
+            category_id=roster_category_id,
+            pt_user_id=pt_user_id,
+        )
+        if category is None:
+            raise TrainingNotFoundError("pt_roster_category_not_found")
+        return category
+
+    def _build_roster_client_view(self, link: PtClientLink) -> PTRosterClientView | None:
+        client_user = user_repo.get_by_id(self._session, link.client_user_id)
+        if client_user is None or client_user.role != Role.CLIENT:
+            return None
+
+        return PTRosterClientView(
+            link=link,
+            client_name=client_user.email,
+            client_email=client_user.email,
+            roster_name=link.roster_category.name if link.roster_category is not None else None,
+        )
+
+
+class PtRosterCategoryService:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_category(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        name: str,
+    ) -> PtRosterCategory:
+        normalized_name = name.strip()
+        if len(normalized_name) == 0:
+            raise TrainingValidationError("pt_roster_category_name_required")
+        try:
+            return training_repo.create_pt_roster_category(
+                self._session,
+                pt_user_id=pt_user_id,
+                name=normalized_name,
+            )
+        except IntegrityError as exc:
+            raise TrainingConflictError("pt_roster_category_already_exists") from exc
+
+    def list_categories(self, pt_user_id: uuid.UUID) -> list[PtRosterCategory]:
+        return training_repo.list_pt_roster_categories_for_pt(self._session, pt_user_id)
 
 
 class PtFolderService:
