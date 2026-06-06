@@ -20,11 +20,13 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    bind = op.get_bind()
     op.add_column(
         "users",
         sa.Column("token_version", sa.Integer(), server_default="0", nullable=False),
     )
-    op.alter_column("users", "token_version", server_default=None)
+    if bind.dialect.name != "sqlite":
+        op.alter_column("users", "token_version", server_default=None)
 
     op.create_table(
         "auth_failure_trackers",

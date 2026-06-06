@@ -19,6 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    bind = op.get_bind()
     op.add_column(
         "stripe_webhook_events",
         sa.Column("payload_sha256", sa.String(length=64), server_default="", nullable=False),
@@ -29,7 +30,8 @@ def upgrade() -> None:
         ["payload_sha256"],
         unique=False,
     )
-    op.alter_column("stripe_webhook_events", "payload_sha256", server_default=None)
+    if bind.dialect.name != "sqlite":
+        op.alter_column("stripe_webhook_events", "payload_sha256", server_default=None)
 
 
 def downgrade() -> None:
@@ -39,4 +41,3 @@ def downgrade() -> None:
         table_name="stripe_webhook_events",
     )
     op.drop_column("stripe_webhook_events", "payload_sha256")
-

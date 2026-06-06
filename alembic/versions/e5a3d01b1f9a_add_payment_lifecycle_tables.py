@@ -5,18 +5,17 @@ Revises: ddc99c5e5a6c
 Create Date: 2026-03-15 12:00:00.000000
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 # revision identifiers, used by Alembic.
 revision: str = "e5a3d01b1f9a"
-down_revision: Union[str, Sequence[str], None] = "ddc99c5e5a6c"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "ddc99c5e5a6c"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 payment_status_enum = sa.Enum(
@@ -104,7 +103,11 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("payment_session_id", sa.UUID(), nullable=True),
-        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column(
+            "payload",
+            sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql"),
+            nullable=False,
+        ),
         sa.Column("request_id", sa.String(length=255), nullable=True),
         sa.Column("processing_error", sa.Text(), nullable=True),
         sa.Column(
