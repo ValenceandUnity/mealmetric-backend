@@ -3,8 +3,9 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Select, delete, select
+from sqlalchemy import Select, String, and_, case, cast, delete, func, literal, or_, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from mealmetric.models.training import (
     AssignmentStatus,
@@ -21,6 +22,7 @@ from mealmetric.models.training import (
     WorkoutCompletionStatus,
     WorkoutLog,
     WorkoutLogExerciseEntry,
+    WorkoutLogMode,
 )
 
 
@@ -535,6 +537,7 @@ def create_workout_log(
     routine_id: uuid.UUID | None,
     performed_at: datetime,
     duration_minutes: int | None,
+    mode: WorkoutLogMode | None,
     completion_status: WorkoutCompletionStatus,
     client_notes: str | None,
     exercise_entries: Sequence[
@@ -549,6 +552,7 @@ def create_workout_log(
         routine_id=routine_id,
         performed_at=performed_at,
         duration_minutes=duration_minutes,
+        mode=mode,
         completion_status=completion_status,
         client_notes=client_notes,
         pt_notes=pt_notes,
@@ -595,28 +599,123 @@ def save_workout_log(session: Session, workout_log: WorkoutLog) -> WorkoutLog:
     return workout_log
 
 
-def list_workout_logs_for_client(session: Session, client_user_id: uuid.UUID) -> list[WorkoutLog]:
+def _resolved_workout_log_mode_expr() -> ColumnElement[str]:
+    return case(
+        (WorkoutLog.mode.is_not(None), cast(WorkoutLog.mode, String())),
+        (WorkoutLog.routine_id.is_not(None), literal(WorkoutLogMode.REP.value)),
+        else_=literal(WorkoutLogMode.GENERAL_WORKOUT.value),
+    )
+
+
+def _apply_workout_log_filters(
+    stmt: Select[tuple[WorkoutLog]],
+    *,
+    mode: WorkoutLogMode | None = None,
+    search: str | None = None,
+) -> Select[tuple[WorkoutLog]]:
+    resolved_mode = _resolved_workout_log_mode_expr()
+
+    if mode is not None:
+        if mode == WorkoutLogMode.SET:
+            stmt = stmt.where(WorkoutLog.mode == WorkoutLogMode.SET)
+        elif mode == WorkoutLogMode.REP:
+            stmt = stmt.where(
+                or_(
+                    WorkoutLog.mode == WorkoutLogMode.REP,
+                    and_(WorkoutLog.mode.is_(None), WorkoutLog.routine_id.is_not(None)),
+                )
+            )
+        else:
+            stmt = stmt.where(
+                or_(
+                    WorkoutLog.mode == WorkoutLogMode.GENERAL_WORKOUT,
+                    and_(WorkoutLog.mode.is_(None), WorkoutLog.routine_id.is_(None)),
+                )
+            )
+
+    normalized_search = (search or "").strip().lower()
+    if normalized_search:
+        like_pattern = f"%{normalized_search}%"
+        stmt = stmt.outerjoin(WorkoutLog.routine).outerjoin(WorkoutLog.exercise_entries).where(
+            or_(
+                func.lower(func.coalesce(WorkoutLog.client_notes, "")).like(like_pattern),
+                func.lower(func.coalesce(WorkoutLog.pt_notes, "")).like(like_pattern),
+                func.lower(func.coalesce(Routine.title, "")).like(like_pattern),
+                func.lower(func.coalesce(WorkoutLogExerciseEntry.exercise_name, "")).like(
+                    like_pattern
+                ),
+                func.lower(func.coalesce(WorkoutLogExerciseEntry.notes, "")).like(like_pattern),
+                func.lower(func.replace(resolved_mode, "_", " ")).like(like_pattern),
+                func.lower(resolved_mode).like(like_pattern),
+            )
+        )
+
+    return stmt
+
+
+def _list_workout_logs_page(
+    session: Session,
+    *,
+    where_clauses: Sequence[ColumnElement[bool]],
+    limit: int,
+    offset: int,
+    mode: WorkoutLogMode | None = None,
+    search: str | None = None,
+) -> tuple[list[WorkoutLog], bool]:
     stmt: Select[tuple[WorkoutLog]] = (
         select(WorkoutLog)
         .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
-        .where(WorkoutLog.client_user_id == client_user_id)
-        .order_by(
-            WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
-        )
+        .where(*where_clauses)
     )
-    return list(session.scalars(stmt))
+    stmt = _apply_workout_log_filters(stmt, mode=mode, search=search)
+    stmt = (
+        stmt.distinct()
+        .order_by(WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc())
+        .offset(offset)
+        .limit(limit + 1)
+    )
+    rows = list(session.scalars(stmt))
+    has_more = len(rows) > limit
+    return rows[:limit], has_more
+
+
+def list_workout_logs_for_client(session: Session, client_user_id: uuid.UUID) -> list[WorkoutLog]:
+    logs, _ = _list_workout_logs_page(
+        session,
+        where_clauses=[WorkoutLog.client_user_id == client_user_id],
+        limit=10_000,
+        offset=0,
+    )
+    return logs
+
+
+def list_workout_logs_for_client_page(
+    session: Session,
+    *,
+    client_user_id: uuid.UUID,
+    limit: int,
+    offset: int,
+    mode: WorkoutLogMode | None = None,
+    search: str | None = None,
+) -> tuple[list[WorkoutLog], bool]:
+    return _list_workout_logs_page(
+        session,
+        where_clauses=[WorkoutLog.client_user_id == client_user_id],
+        limit=limit,
+        offset=offset,
+        mode=mode,
+        search=search,
+    )
 
 
 def list_workout_logs_for_pt(session: Session, pt_user_id: uuid.UUID) -> list[WorkoutLog]:
-    stmt: Select[tuple[WorkoutLog]] = (
-        select(WorkoutLog)
-        .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
-        .where(WorkoutLog.pt_user_id == pt_user_id)
-        .order_by(
-            WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
-        )
+    logs, _ = _list_workout_logs_page(
+        session,
+        where_clauses=[WorkoutLog.pt_user_id == pt_user_id],
+        limit=10_000,
+        offset=0,
     )
-    return list(session.scalars(stmt))
+    return logs
 
 
 def list_workout_logs_for_pt_client(
@@ -625,18 +724,39 @@ def list_workout_logs_for_pt_client(
     pt_user_id: uuid.UUID,
     client_user_id: uuid.UUID,
 ) -> list[WorkoutLog]:
-    stmt: Select[tuple[WorkoutLog]] = (
-        select(WorkoutLog)
-        .options(selectinload(WorkoutLog.exercise_entries), selectinload(WorkoutLog.routine))
-        .where(
+    logs, _ = _list_workout_logs_page(
+        session,
+        where_clauses=[
             WorkoutLog.pt_user_id == pt_user_id,
             WorkoutLog.client_user_id == client_user_id,
-        )
-        .order_by(
-            WorkoutLog.performed_at.desc(), WorkoutLog.created_at.desc(), WorkoutLog.id.desc()
-        )
+        ],
+        limit=10_000,
+        offset=0,
     )
-    return list(session.scalars(stmt))
+    return logs
+
+
+def list_workout_logs_for_pt_client_page(
+    session: Session,
+    *,
+    pt_user_id: uuid.UUID,
+    client_user_id: uuid.UUID,
+    limit: int,
+    offset: int,
+    mode: WorkoutLogMode | None = None,
+    search: str | None = None,
+) -> tuple[list[WorkoutLog], bool]:
+    return _list_workout_logs_page(
+        session,
+        where_clauses=[
+            WorkoutLog.pt_user_id == pt_user_id,
+            WorkoutLog.client_user_id == client_user_id,
+        ],
+        limit=limit,
+        offset=offset,
+        mode=mode,
+        search=search,
+    )
 
 
 def package_contains_routine(

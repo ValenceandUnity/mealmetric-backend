@@ -527,3 +527,144 @@ def test_client_assignment_list_order_is_deterministic(
     items = response.json()["items"]
     assert items[0]["id"] == second["assignment_id"]
     assert items[1]["id"] == first["assignment_id"]
+
+
+def test_client_workout_logs_support_explicit_modes_and_mode_filters(
+    client_training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    pt_headers = _register_headers(client_training_api_client, bff_headers, "pt")
+    client_headers = _register_headers(client_training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(client_training_api_client, client_headers)
+    bundle = _seed_assignment_bundle(client_training_api_client, pt_headers, client_user_id)
+
+    rep_response = client_training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "assignment_id": bundle["assignment_id"],
+            "routine_id": bundle["routine_id"],
+            "mode": "rep",
+            "performed_at": "2026-03-20T12:30:00Z",
+            "completion_status": "completed",
+            "exercise_entries": [{"exercise_name": "Front Squat", "position": 0}],
+        },
+        headers=client_headers,
+    )
+    assert rep_response.status_code == 201
+    assert rep_response.json()["mode"] == "rep"
+
+    set_response = client_training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "assignment_id": bundle["assignment_id"],
+            "mode": "set",
+            "performed_at": "2026-03-20T12:20:00Z",
+            "completion_status": "completed",
+            "exercise_entries": [{"exercise_name": "Walking Lunge", "sets": 4, "position": 0}],
+        },
+        headers=client_headers,
+    )
+    assert set_response.status_code == 201
+    assert set_response.json()["mode"] == "set"
+
+    general_response = client_training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "assignment_id": bundle["assignment_id"],
+            "mode": "general_workout",
+            "performed_at": "2026-03-20T12:10:00Z",
+            "completion_status": "completed",
+            "client_notes": "General conditioning",
+        },
+        headers=client_headers,
+    )
+    assert general_response.status_code == 201
+    assert general_response.json()["mode"] == "general_workout"
+
+    rep_list = client_training_api_client.get(
+        "/client/training/workout-logs?mode=rep",
+        headers=client_headers,
+    )
+    assert rep_list.status_code == 200
+    rep_payload = rep_list.json()
+    assert rep_payload["count"] == 1
+    assert rep_payload["items"][0]["mode"] == "rep"
+
+    set_list = client_training_api_client.get(
+        "/client/training/workout-logs?mode=set",
+        headers=client_headers,
+    )
+    assert set_list.status_code == 200
+    set_payload = set_list.json()
+    assert set_payload["count"] == 1
+    assert set_payload["items"][0]["mode"] == "set"
+
+    general_list = client_training_api_client.get(
+        "/client/training/workout-logs?mode=general_workout",
+        headers=client_headers,
+    )
+    assert general_list.status_code == 200
+    general_payload = general_list.json()
+    assert general_payload["count"] == 1
+    assert general_payload["items"][0]["mode"] == "general_workout"
+
+
+def test_client_workout_logs_support_backend_pagination_search_and_newest_first_order(
+    client_training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    pt_headers = _register_headers(client_training_api_client, bff_headers, "pt")
+    client_headers = _register_headers(client_training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(client_training_api_client, client_headers)
+    bundle = _seed_assignment_bundle(client_training_api_client, pt_headers, client_user_id)
+
+    for index in range(31):
+        exercise_name = "Target Search Exercise" if index == 5 else f"Exercise {index}"
+        response = client_training_api_client.post(
+            "/client/training/workout-logs",
+            json={
+                "assignment_id": bundle["assignment_id"],
+                "mode": "general_workout",
+                "performed_at": f"2026-03-20T12:{index:02d}:00Z",
+                "completion_status": "completed",
+                "exercise_entries": [{"exercise_name": exercise_name, "position": 0}],
+            },
+            headers=client_headers,
+        )
+        assert response.status_code == 201
+
+    first_page = client_training_api_client.get(
+        "/client/training/workout-logs?limit=30&offset=0",
+        headers=client_headers,
+    )
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert first_payload["count"] == 30
+    assert first_payload["limit"] == 30
+    assert first_payload["offset"] == 0
+    assert first_payload["next_offset"] == 30
+    assert first_payload["has_more"] is True
+    assert first_payload["items"][0]["exercise_entries"][0]["exercise_name"] == "Exercise 30"
+
+    second_page = client_training_api_client.get(
+        "/client/training/workout-logs?limit=30&offset=30",
+        headers=client_headers,
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert second_payload["count"] == 1
+    assert second_payload["offset"] == 30
+    assert second_payload["next_offset"] is None
+    assert second_payload["has_more"] is False
+    assert second_payload["items"][0]["exercise_entries"][0]["exercise_name"] == "Exercise 0"
+
+    search_response = client_training_api_client.get(
+        "/client/training/workout-logs?search=Target%20Search%20Exercise",
+        headers=client_headers,
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.json()
+    assert search_payload["count"] == 1
+    assert search_payload["items"][0]["exercise_entries"][0]["exercise_name"] == (
+        "Target Search Exercise"
+    )

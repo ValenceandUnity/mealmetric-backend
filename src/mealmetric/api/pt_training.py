@@ -11,14 +11,14 @@ from mealmetric.api.deps.auth import (
     require_roles,
     require_trusted_caller,
 )
-from mealmetric.api.schemas.metrics import (
-    MetricsFreshnessResponse,
-    OverviewMetricsResponse,
-)
 from mealmetric.api.schemas.client_training import (
     ClientWorkoutLogExerciseEntryRead,
     ClientWorkoutLogListResponse,
     ClientWorkoutLogRead,
+)
+from mealmetric.api.schemas.metrics import (
+    MetricsFreshnessResponse,
+    OverviewMetricsResponse,
 )
 from mealmetric.api.schemas.training import (
     ChecklistItemListResponse,
@@ -31,14 +31,14 @@ from mealmetric.api.schemas.training import (
     PackageRoutineListResponse,
     PackageRoutineRead,
     PackageRoutineReplaceRequest,
-    PTDashboardClientSummaryListResponse,
-    PTDashboardClientSummaryRead,
     PTClientDetailRead,
     PTClientLinkCreateRequest,
     PTClientLinkListResponse,
     PTClientLinkRead,
     PTClientLinkStatusUpdateRequest,
     PTClientProfileRead,
+    PTDashboardClientSummaryListResponse,
+    PTDashboardClientSummaryRead,
     PTFolderCreateRequest,
     PTFolderListResponse,
     PTFolderRead,
@@ -74,9 +74,9 @@ from mealmetric.services.training_service import (
     ChecklistItemInput,
     ChecklistService,
     PackageRoutineInput,
-    PTDashboardClientSummaryView,
     PTClientDetailView,
     PtClientLinkService,
+    PTDashboardClientSummaryView,
     PtFolderService,
     PtProfileService,
     RoutineService,
@@ -86,6 +86,7 @@ from mealmetric.services.training_service import (
     TrainingPermissionError,
     TrainingValidationError,
     WorkoutLogService,
+    resolve_workout_log_mode,
 )
 
 router = APIRouter(
@@ -256,6 +257,7 @@ def _workout_log_to_read(workout_log: WorkoutLog) -> ClientWorkoutLogRead:
         routine_title=workout_log.routine.title if workout_log.routine is not None else None,
         performed_at=workout_log.performed_at,
         duration_minutes=workout_log.duration_minutes,
+        mode=resolve_workout_log_mode(mode=workout_log.mode, routine_id=workout_log.routine_id),
         completion_status=workout_log.completion_status,
         client_notes=workout_log.client_notes,
         pt_notes=workout_log.pt_notes,
@@ -934,7 +936,14 @@ def list_client_workout_logs(
         raise _translate_service_error(exc) from exc
 
     items = [_workout_log_to_read(workout_log) for workout_log in workout_logs]
-    return ClientWorkoutLogListResponse(items=items, count=len(items))
+    return ClientWorkoutLogListResponse(
+        items=items,
+        count=len(items),
+        limit=len(items),
+        offset=0,
+        next_offset=None,
+        has_more=False,
+    )
 
 
 @router.patch(

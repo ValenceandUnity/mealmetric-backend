@@ -148,6 +148,54 @@ def test_workout_log_exercise_entries_migration_upgrade_and_downgrade() -> None:
         assert "workout_log_exercise_entries" not in remaining_tables
 
 
+def test_workout_log_mode_migration_lineage() -> None:
+    workout_mode_module = cast(
+        Any,
+        _load_migration_module(
+            "e7c4a1b2d9f0_add_workout_log_mode_for_history_filters.py",
+            "phase_h1_workout_mode",
+        ),
+    )
+    assert workout_mode_module.down_revision == "b8f9e3c7d4a1"
+
+
+def test_workout_log_mode_migration_upgrade_and_downgrade() -> None:
+    workout_mode_module = cast(
+        Any,
+        _load_migration_module(
+            "e7c4a1b2d9f0_add_workout_log_mode_for_history_filters.py",
+            "phase_h1_workout_mode_upgrade",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE workout_logs (
+                    id UUID NOT NULL PRIMARY KEY
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            workout_mode_module.upgrade()
+
+        inspector = sa.inspect(conn)
+        column_names = {column["name"] for column in inspector.get_columns("workout_logs")}
+        assert "mode" in column_names
+
+        with Operations.context(MigrationContext.configure(conn)):
+            workout_mode_module.downgrade()
+
+        remaining_columns = {
+            column["name"] for column in sa.inspect(conn).get_columns("workout_logs")
+        }
+        assert "mode" not in remaining_columns
+
+
 def test_training_tables_registered_in_metadata() -> None:
     expected_tables = {
         "pt_profiles",

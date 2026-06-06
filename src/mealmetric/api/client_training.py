@@ -2,7 +2,7 @@ from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from mealmetric.api.deps.auth import get_current_user, require_roles, require_trusted_caller
@@ -26,6 +26,7 @@ from mealmetric.models.training import (
     TrainingPackage,
     TrainingPackageRoutine,
     WorkoutLog,
+    WorkoutLogMode,
 )
 from mealmetric.models.user import Role, User
 from mealmetric.services.training_service import (
@@ -35,6 +36,7 @@ from mealmetric.services.training_service import (
     TrainingPermissionError,
     TrainingValidationError,
     WorkoutLogExerciseEntryInput,
+    resolve_workout_log_mode,
 )
 
 router = APIRouter(
@@ -141,6 +143,7 @@ def _to_workout_log_read(workout_log: WorkoutLog) -> ClientWorkoutLogRead:
         routine_title=workout_log.routine.title if workout_log.routine is not None else None,
         performed_at=workout_log.performed_at,
         duration_minutes=workout_log.duration_minutes,
+        mode=resolve_workout_log_mode(mode=workout_log.mode, routine_id=workout_log.routine_id),
         completion_status=workout_log.completion_status,
         client_notes=workout_log.client_notes,
         pt_notes=workout_log.pt_notes,
@@ -232,13 +235,31 @@ def get_client_assignment_checklist(
 
 @router.get("/workout-logs", response_model=ClientWorkoutLogListResponse)
 def list_client_workout_logs(
-    db: DBSessionDep, current_user: CurrentUserDep
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    mode: WorkoutLogMode | None = None,
+    search: str | None = None,
 ) -> ClientWorkoutLogListResponse:
     session = _require_db(db)
     service = ClientTrainingService(session)
-    workout_logs = service.list_workout_logs_for_client(current_user.id)
-    items = [_to_workout_log_read(workout_log) for workout_log in workout_logs]
-    return ClientWorkoutLogListResponse(items=items, count=len(items))
+    page = service.list_workout_log_page_for_client(
+        client_user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+        mode=mode,
+        search=search,
+    )
+    items = [_to_workout_log_read(workout_log) for workout_log in page.items]
+    return ClientWorkoutLogListResponse(
+        items=items,
+        count=len(items),
+        limit=page.limit,
+        offset=page.offset,
+        next_offset=page.next_offset,
+        has_more=page.has_more,
+    )
 
 
 @router.post(
@@ -259,6 +280,7 @@ def create_client_workout_log(
             client_user_id=current_user.id,
             assignment_id=payload.assignment_id,
             routine_id=payload.routine_id,
+            mode=payload.mode,
             performed_at=payload.performed_at,
             duration_minutes=payload.duration_minutes,
             completion_status=payload.completion_status,

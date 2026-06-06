@@ -22,6 +22,7 @@ from mealmetric.models.training import (
     TrainingPackageStatus,
     WorkoutCompletionStatus,
     WorkoutLog,
+    WorkoutLogMode,
 )
 from mealmetric.models.user import Role
 from mealmetric.repos import audit_log_repo, training_repo, user_repo
@@ -75,6 +76,27 @@ class WorkoutLogExerciseEntryInput:
     duration_seconds: int | None = None
     notes: str | None = None
     position: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class WorkoutLogListPage:
+    items: tuple[WorkoutLog, ...]
+    limit: int
+    offset: int
+    next_offset: int | None
+    has_more: bool
+
+
+def resolve_workout_log_mode(
+    *,
+    mode: WorkoutLogMode | None,
+    routine_id: uuid.UUID | None,
+) -> WorkoutLogMode:
+    if mode is not None:
+        return mode
+    if routine_id is not None:
+        return WorkoutLogMode.REP
+    return WorkoutLogMode.GENERAL_WORKOUT
 
 
 @dataclass(frozen=True, slots=True)
@@ -853,12 +875,32 @@ class ClientTrainingService:
             client_user_id=client_user_id,
         )
 
+    def list_workout_log_page_for_client(
+        self,
+        *,
+        client_user_id: uuid.UUID,
+        limit: int = 30,
+        offset: int = 0,
+        mode: WorkoutLogMode | None = None,
+        search: str | None = None,
+    ) -> WorkoutLogListPage:
+        workout_log_service = WorkoutLogService(self._session)
+        return workout_log_service.list_workout_log_page_for_client(
+            requester_user_id=client_user_id,
+            client_user_id=client_user_id,
+            limit=limit,
+            offset=offset,
+            mode=mode,
+            search=search,
+        )
+
     def create_workout_log_for_client(
         self,
         *,
         client_user_id: uuid.UUID,
         assignment_id: uuid.UUID | None = None,
         routine_id: uuid.UUID | None = None,
+        mode: WorkoutLogMode | None = None,
         performed_at: datetime | None = None,
         duration_minutes: int | None = None,
         completion_status: WorkoutCompletionStatus = WorkoutCompletionStatus.COMPLETED,
@@ -917,6 +959,7 @@ class ClientTrainingService:
             client_user_id=client_user_id,
             assignment_id=assignment_id,
             routine_id=routine_id,
+            mode=mode,
             performed_at=performed_at,
             duration_minutes=duration_minutes,
             completion_status=completion_status,
@@ -953,6 +996,7 @@ class WorkoutLogService:
         client_user_id: uuid.UUID,
         assignment_id: uuid.UUID | None = None,
         routine_id: uuid.UUID | None = None,
+        mode: WorkoutLogMode | None = None,
         performed_at: datetime | None = None,
         duration_minutes: int | None = None,
         completion_status: WorkoutCompletionStatus = WorkoutCompletionStatus.COMPLETED,
@@ -993,6 +1037,7 @@ class WorkoutLogService:
 
         normalized_entries = self._normalize_exercise_entries(exercise_entries)
         logged_at = performed_at or datetime.now(UTC)
+        resolved_mode = resolve_workout_log_mode(mode=mode, routine_id=routine_id)
         workout_log = training_repo.create_workout_log(
             self._session,
             client_user_id=client_user_id,
@@ -1001,6 +1046,7 @@ class WorkoutLogService:
             routine_id=routine_id,
             performed_at=logged_at,
             duration_minutes=duration_minutes,
+            mode=resolved_mode,
             completion_status=completion_status,
             client_notes=client_notes,
             exercise_entries=[
@@ -1029,27 +1075,64 @@ class WorkoutLogService:
         )
         return workout_log
 
+    def list_workout_log_page_for_client(
+        self,
+        *,
+        requester_user_id: uuid.UUID,
+        client_user_id: uuid.UUID,
+        limit: int = 30,
+        offset: int = 0,
+        mode: WorkoutLogMode | None = None,
+        search: str | None = None,
+    ) -> WorkoutLogListPage:
+        if requester_user_id == client_user_id:
+            items, has_more = training_repo.list_workout_logs_for_client_page(
+                self._session,
+                client_user_id=client_user_id,
+                limit=limit,
+                offset=offset,
+                mode=mode,
+                search=search,
+            )
+        else:
+            pt_client_link = training_repo.get_pt_client_link_by_pair(
+                self._session,
+                pt_user_id=requester_user_id,
+                client_user_id=client_user_id,
+            )
+            if pt_client_link is None:
+                raise TrainingPermissionError("workout_logs_not_in_scope")
+            items, has_more = training_repo.list_workout_logs_for_pt_client_page(
+                self._session,
+                pt_user_id=requester_user_id,
+                client_user_id=client_user_id,
+                limit=limit,
+                offset=offset,
+                mode=mode,
+                search=search,
+            )
+
+        return WorkoutLogListPage(
+            items=tuple(items),
+            limit=limit,
+            offset=offset,
+            next_offset=(offset + len(items)) if has_more else None,
+            has_more=has_more,
+        )
+
     def list_workout_logs_for_client(
         self,
         *,
         requester_user_id: uuid.UUID,
         client_user_id: uuid.UUID,
     ) -> list[WorkoutLog]:
-        if requester_user_id == client_user_id:
-            return training_repo.list_workout_logs_for_client(self._session, client_user_id)
-
-        pt_client_link = training_repo.get_pt_client_link_by_pair(
-            self._session,
-            pt_user_id=requester_user_id,
+        page = self.list_workout_log_page_for_client(
+            requester_user_id=requester_user_id,
             client_user_id=client_user_id,
+            limit=10_000,
+            offset=0,
         )
-        if pt_client_link is None:
-            raise TrainingPermissionError("workout_logs_not_in_scope")
-        return training_repo.list_workout_logs_for_pt_client(
-            self._session,
-            pt_user_id=requester_user_id,
-            client_user_id=client_user_id,
-        )
+        return list(page.items)
 
     def list_workout_logs_for_pt(self, pt_user_id: uuid.UUID) -> list[WorkoutLog]:
         return training_repo.list_workout_logs_for_pt(self._session, pt_user_id)

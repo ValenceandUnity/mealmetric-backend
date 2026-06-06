@@ -8,6 +8,7 @@ from mealmetric.models.training import (
     AssignmentStatus,
     TrainingPackageStatus,
     WorkoutCompletionStatus,
+    WorkoutLogMode,
 )
 
 
@@ -76,6 +77,7 @@ class ClientWorkoutLogRead(BaseModel):
     routine_title: str | None
     performed_at: datetime
     duration_minutes: int | None
+    mode: WorkoutLogMode
     completion_status: WorkoutCompletionStatus
     client_notes: str | None
     pt_notes: str | None
@@ -87,11 +89,16 @@ class ClientWorkoutLogRead(BaseModel):
 class ClientWorkoutLogListResponse(BaseModel):
     items: list[ClientWorkoutLogRead]
     count: int
+    limit: int
+    offset: int
+    next_offset: int | None
+    has_more: bool
 
 
 class ClientWorkoutLogCreateRequest(BaseModel):
     assignment_id: uuid.UUID | None = None
     routine_id: uuid.UUID | None = None
+    mode: WorkoutLogMode | None = None
     performed_at: datetime | None = None
     duration_minutes: int | None = None
     completion_status: WorkoutCompletionStatus = WorkoutCompletionStatus.COMPLETED

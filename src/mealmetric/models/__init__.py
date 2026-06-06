@@ -45,6 +45,7 @@ from mealmetric.models.training import (
     WorkoutCompletionStatus,
     WorkoutLog,
     WorkoutLogExerciseEntry,
+    WorkoutLogMode,
 )
 from mealmetric.models.user import Role, User
 from mealmetric.models.user_role import UserRole
@@ -127,4 +128,5 @@ __all__ = [
     "WorkoutCompletionStatus",
     "WorkoutLogExerciseEntry",
     "WorkoutLog",
+    "WorkoutLogMode",
 ]

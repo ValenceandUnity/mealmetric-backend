@@ -11,6 +11,7 @@ from mealmetric.models.training import (
     PtClientLinkStatus,
     TrainingPackageStatus,
     WorkoutCompletionStatus,
+    WorkoutLogMode,
 )
 from mealmetric.models.user import Role, User
 from mealmetric.services.training_service import (
@@ -29,6 +30,7 @@ from mealmetric.services.training_service import (
     TrainingValidationError,
     WorkoutLogExerciseEntryInput,
     WorkoutLogService,
+    resolve_workout_log_mode,
 )
 
 
@@ -365,6 +367,110 @@ def test_workout_log_service_rejects_empty_structured_exercise_entry() -> None:
                 completion_status=WorkoutCompletionStatus.COMPLETED,
                 exercise_entries=[WorkoutLogExerciseEntryInput(position=0)],
             )
+
+
+def test_resolve_workout_log_mode_preserves_backwards_compatible_defaults() -> None:
+    assert resolve_workout_log_mode(mode=WorkoutLogMode.SET, routine_id=None) == WorkoutLogMode.SET
+    assert resolve_workout_log_mode(mode=None, routine_id=None) == WorkoutLogMode.GENERAL_WORKOUT
+
+
+def test_workout_log_service_supports_mode_filter_search_and_pagination() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt = _create_user(db, email="pt-history@example.com", role=Role.PT)
+        client = _create_user(db, email="client-history@example.com", role=Role.CLIENT)
+
+        link_service = PtClientLinkService(db)
+        routine_service = RoutineService(db)
+        package_service = TrainingPackageService(db)
+        assignment_service = AssignmentService(db)
+        workout_service = WorkoutLogService(db)
+
+        link_service.create_link(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+        routine = routine_service.create_routine(pt_user_id=pt.id, title="History Routine")
+        training_package = package_service.create_training_package(pt_user_id=pt.id, title="History Pack")
+        assignment = assignment_service.assign_package_to_client(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            training_package_id=training_package.id,
+            status=AssignmentStatus.ACTIVE,
+        )
+
+        workout_service.create_workout_log(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            assignment_id=assignment.id,
+            routine_id=routine.id,
+            mode=WorkoutLogMode.REP,
+            performed_at=datetime(2026, 3, 16, 12, 2, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[WorkoutLogExerciseEntryInput(exercise_name="Bench", position=0)],
+        )
+        workout_service.create_workout_log(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            assignment_id=assignment.id,
+            mode=WorkoutLogMode.SET,
+            performed_at=datetime(2026, 3, 16, 12, 1, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[WorkoutLogExerciseEntryInput(exercise_name="Lunge", position=0)],
+        )
+        workout_service.create_workout_log(
+            pt_user_id=pt.id,
+            client_user_id=client.id,
+            assignment_id=assignment.id,
+            mode=WorkoutLogMode.GENERAL_WORKOUT,
+            performed_at=datetime(2026, 3, 16, 12, 0, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            client_notes="conditioning finisher",
+            exercise_entries=[WorkoutLogExerciseEntryInput(exercise_name="Bike", position=0)],
+        )
+
+        first_page = workout_service.list_workout_log_page_for_client(
+            requester_user_id=client.id,
+            client_user_id=client.id,
+            limit=2,
+            offset=0,
+        )
+        assert len(first_page.items) == 2
+        assert first_page.items[0].mode == WorkoutLogMode.REP
+        assert first_page.has_more is True
+        assert first_page.next_offset == 2
+
+        second_page = workout_service.list_workout_log_page_for_client(
+            requester_user_id=client.id,
+            client_user_id=client.id,
+            limit=2,
+            offset=2,
+        )
+        assert len(second_page.items) == 1
+        assert second_page.items[0].mode == WorkoutLogMode.GENERAL_WORKOUT
+        assert second_page.has_more is False
+        assert second_page.next_offset is None
+
+        set_page = workout_service.list_workout_log_page_for_client(
+            requester_user_id=client.id,
+            client_user_id=client.id,
+            limit=30,
+            offset=0,
+            mode=WorkoutLogMode.SET,
+        )
+        assert len(set_page.items) == 1
+        assert set_page.items[0].mode == WorkoutLogMode.SET
+
+        search_page = workout_service.list_workout_log_page_for_client(
+            requester_user_id=client.id,
+            client_user_id=client.id,
+            limit=30,
+            offset=0,
+            search="conditioning",
+        )
+        assert len(search_page.items) == 1
+        assert search_page.items[0].mode == WorkoutLogMode.GENERAL_WORKOUT
 
 
 def test_archive_and_update_behaviors() -> None:

@@ -54,6 +54,12 @@ class WorkoutCompletionStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class WorkoutLogMode(StrEnum):
+    REP = "rep"
+    SET = "set"
+    GENERAL_WORKOUT = "general_workout"
+
+
 class PtProfile(Base):
     __tablename__ = "pt_profiles"
 
@@ -457,6 +463,16 @@ class WorkoutLog(Base):
         index=True,
     )
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mode: Mapped[WorkoutLogMode | None] = mapped_column(
+        Enum(
+            WorkoutLogMode,
+            name="workout_log_mode",
+            native_enum=False,
+            create_constraint=True,
+        ),
+        nullable=True,
+        index=True,
+    )
     completion_status: Mapped[WorkoutCompletionStatus] = mapped_column(
         Enum(
             WorkoutCompletionStatus,
