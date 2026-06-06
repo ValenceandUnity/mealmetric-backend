@@ -71,7 +71,7 @@ class ClientAssignmentChecklistResponse(BaseModel):
 class ClientWorkoutLogRead(BaseModel):
     id: uuid.UUID
     client_user_id: uuid.UUID
-    pt_user_id: uuid.UUID
+    pt_user_id: uuid.UUID | None
     assignment_id: uuid.UUID | None
     routine_id: uuid.UUID | None
     routine_title: str | None

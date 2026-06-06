@@ -907,10 +907,8 @@ class ClientTrainingService:
         client_notes: str | None = None,
         exercise_entries: Sequence[WorkoutLogExerciseEntryInput] = (),
     ) -> WorkoutLog:
-        if assignment_id is None and routine_id is None:
-            raise TrainingValidationError("workout_log_anchor_required")
-
         pt_user_id: uuid.UUID | None = None
+        assignment: ClientTrainingPackageAssignment | None = None
 
         if assignment_id is not None:
             assignment = training_repo.get_assignment_for_client(
@@ -950,9 +948,6 @@ class ClientTrainingService:
             if link is None:
                 raise TrainingPermissionError("routine_not_assigned_to_client")
 
-        if pt_user_id is None:
-            raise TrainingValidationError("workout_log_anchor_required")
-
         workout_log_service = WorkoutLogService(self._session)
         workout_log = workout_log_service.create_workout_log(
             pt_user_id=pt_user_id,
@@ -971,17 +966,18 @@ class ClientTrainingService:
             "client_workout_log_created",
             extra={
                 "client_user_id": str(client_user_id),
-                "pt_user_id": str(pt_user_id),
+                "pt_user_id": (str(pt_user_id) if pt_user_id is not None else None),
                 "workout_log_id": str(workout_log.id),
                 "assignment_id": (str(assignment_id) if assignment_id is not None else None),
                 "routine_id": str(routine_id) if routine_id is not None else None,
             },
         )
-        NotificationService(self._session).create_client_workout_logged_notification(
-            pt_user_id=pt_user_id,
-            client_user_id=client_user_id,
-            workout_log_id=workout_log.id,
-        )
+        if pt_user_id is not None:
+            NotificationService(self._session).create_client_workout_logged_notification(
+                pt_user_id=pt_user_id,
+                client_user_id=client_user_id,
+                workout_log_id=workout_log.id,
+            )
         return workout_log
 
 
@@ -992,7 +988,7 @@ class WorkoutLogService:
     def create_workout_log(
         self,
         *,
-        pt_user_id: uuid.UUID,
+        pt_user_id: uuid.UUID | None,
         client_user_id: uuid.UUID,
         assignment_id: uuid.UUID | None = None,
         routine_id: uuid.UUID | None = None,
@@ -1004,36 +1000,37 @@ class WorkoutLogService:
         exercise_entries: Sequence[WorkoutLogExerciseEntryInput] = (),
         pt_notes: str | None = None,
     ) -> WorkoutLog:
-        if assignment_id is None and routine_id is None:
-            raise TrainingValidationError("workout_log_anchor_required")
-
-        pt_client_link = training_repo.get_pt_client_link_by_pair(
-            self._session,
-            pt_user_id=pt_user_id,
-            client_user_id=client_user_id,
-        )
-        if pt_client_link is None:
-            raise TrainingPermissionError("workout_log_link_not_found")
-
-        if assignment_id is not None:
-            assignment = training_repo.get_assignment_for_pt(
+        if pt_user_id is None:
+            if assignment_id is not None or routine_id is not None:
+                raise TrainingValidationError("workout_log_anchor_pt_context_required")
+        else:
+            pt_client_link = training_repo.get_pt_client_link_by_pair(
                 self._session,
-                assignment_id=assignment_id,
                 pt_user_id=pt_user_id,
+                client_user_id=client_user_id,
             )
-            if assignment is None or assignment.client_user_id != client_user_id:
-                raise TrainingPermissionError("assignment_not_owned_for_client")
+            if pt_client_link is None:
+                raise TrainingPermissionError("workout_log_link_not_found")
 
-        if routine_id is not None:
-            routine = training_repo.get_routine_for_pt(
-                self._session,
-                routine_id=routine_id,
-                pt_user_id=pt_user_id,
-            )
-            if routine is None:
-                raise TrainingPermissionError("routine_not_owned")
-            if routine.is_archived:
-                raise TrainingValidationError("routine_archived")
+            if assignment_id is not None:
+                assignment = training_repo.get_assignment_for_pt(
+                    self._session,
+                    assignment_id=assignment_id,
+                    pt_user_id=pt_user_id,
+                )
+                if assignment is None or assignment.client_user_id != client_user_id:
+                    raise TrainingPermissionError("assignment_not_owned_for_client")
+
+            if routine_id is not None:
+                routine = training_repo.get_routine_for_pt(
+                    self._session,
+                    routine_id=routine_id,
+                    pt_user_id=pt_user_id,
+                )
+                if routine is None:
+                    raise TrainingPermissionError("routine_not_owned")
+                if routine.is_archived:
+                    raise TrainingValidationError("routine_archived")
 
         normalized_entries = self._normalize_exercise_entries(exercise_entries)
         logged_at = performed_at or datetime.now(UTC)
@@ -1067,7 +1064,7 @@ class WorkoutLogService:
             "workout_log_created",
             extra={
                 "client_user_id": str(client_user_id),
-                "pt_user_id": str(pt_user_id),
+                "pt_user_id": (str(pt_user_id) if pt_user_id is not None else None),
                 "workout_log_id": str(workout_log.id),
                 "assignment_id": (str(assignment_id) if assignment_id is not None else None),
                 "routine_id": str(routine_id) if routine_id is not None else None,

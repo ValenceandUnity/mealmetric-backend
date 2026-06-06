@@ -28,6 +28,10 @@ if TYPE_CHECKING:
     from mealmetric.models.user import User
 
 
+def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class PtClientLinkStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
@@ -124,6 +128,7 @@ class PtClientLink(Base):
             name="pt_client_link_status",
             native_enum=False,
             create_constraint=True,
+            values_callable=_enum_values,
         ),
         nullable=False,
         default=PtClientLinkStatus.PENDING,
@@ -239,6 +244,7 @@ class TrainingPackage(Base):
             name="training_package_status",
             native_enum=False,
             create_constraint=True,
+            values_callable=_enum_values,
         ),
         nullable=False,
         default=TrainingPackageStatus.DRAFT,
@@ -393,6 +399,7 @@ class ClientTrainingPackageAssignment(Base):
             name="assignment_status",
             native_enum=False,
             create_constraint=True,
+            values_callable=_enum_values,
         ),
         nullable=False,
         default=AssignmentStatus.ASSIGNED,
@@ -423,12 +430,6 @@ class ClientTrainingPackageAssignment(Base):
 
 class WorkoutLog(Base):
     __tablename__ = "workout_logs"
-    __table_args__ = (
-        CheckConstraint(
-            "assignment_id IS NOT NULL OR routine_id IS NOT NULL",
-            name="ck_workout_logs_assignment_or_routine_required",
-        ),
-    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_user_id: Mapped[uuid.UUID] = mapped_column(
@@ -437,10 +438,10 @@ class WorkoutLog(Base):
         nullable=False,
         index=True,
     )
-    pt_user_id: Mapped[uuid.UUID] = mapped_column(
+    pt_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     assignment_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -469,6 +470,7 @@ class WorkoutLog(Base):
             name="workout_log_mode",
             native_enum=False,
             create_constraint=True,
+            values_callable=_enum_values,
         ),
         nullable=True,
         index=True,
@@ -479,6 +481,7 @@ class WorkoutLog(Base):
             name="workout_completion_status",
             native_enum=False,
             create_constraint=True,
+            values_callable=_enum_values,
         ),
         nullable=False,
         default=WorkoutCompletionStatus.COMPLETED,

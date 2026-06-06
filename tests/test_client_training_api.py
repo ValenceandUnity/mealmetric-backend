@@ -296,6 +296,54 @@ def test_client_can_create_workout_log_with_structured_exercise_entries(
     assert list_payload["items"][0]["exercise_entries"][1]["notes"] == "Bike finisher"
 
 
+@pytest.mark.parametrize(
+    ("mode", "exercise_name"),
+    [
+        ("rep", "Standalone Rep Exercise"),
+        ("set", "Standalone Set Exercise"),
+        ("general_workout", "Standalone General Exercise"),
+    ],
+)
+def test_client_can_create_standalone_workout_logs_without_anchor(
+    client_training_api_client: TestClient,
+    bff_headers: dict[str, str],
+    mode: str,
+    exercise_name: str,
+) -> None:
+    client_headers = _register_headers(client_training_api_client, bff_headers, "client")
+    client_user_id = _current_user_id(client_training_api_client, client_headers)
+
+    response = client_training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "mode": mode,
+            "performed_at": "2026-03-20T12:30:00Z",
+            "completion_status": "completed",
+            "exercise_entries": [{"exercise_name": exercise_name, "position": 0}],
+        },
+        headers=client_headers,
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert UUID(payload["id"])
+    assert payload["client_user_id"] == str(client_user_id)
+    assert payload["pt_user_id"] is None
+    assert payload["assignment_id"] is None
+    assert payload["routine_id"] is None
+    assert payload["mode"] == mode
+
+    listed = client_training_api_client.get(
+        f"/client/training/workout-logs?mode={mode}&search={exercise_name}",
+        headers=client_headers,
+    )
+    assert listed.status_code == 200
+    list_payload = listed.json()
+    assert list_payload["count"] == 1
+    assert list_payload["items"][0]["id"] == payload["id"]
+    assert list_payload["items"][0]["mode"] == mode
+    assert list_payload["items"][0]["exercise_entries"][0]["exercise_name"] == exercise_name
+
+
 def test_client_workout_log_rejects_empty_structured_exercise_entry_payload(
     client_training_api_client: TestClient,
     bff_headers: dict[str, str],
@@ -667,4 +715,66 @@ def test_client_workout_logs_support_backend_pagination_search_and_newest_first_
     assert search_payload["count"] == 1
     assert search_payload["items"][0]["exercise_entries"][0]["exercise_name"] == (
         "Target Search Exercise"
+    )
+
+
+def test_standalone_client_workout_logs_support_backend_pagination_search_and_newest_first_order(
+    client_training_api_client: TestClient,
+    bff_headers: dict[str, str],
+) -> None:
+    client_headers = _register_headers(client_training_api_client, bff_headers, "client")
+
+    for index in range(31):
+        exercise_name = (
+            "Target Standalone Search Exercise"
+            if index == 5
+            else f"Standalone Exercise {index}"
+        )
+        response = client_training_api_client.post(
+            "/client/training/workout-logs",
+            json={
+                "mode": "general_workout",
+                "performed_at": f"2026-03-20T12:{index:02d}:00Z",
+                "completion_status": "completed",
+                "exercise_entries": [{"exercise_name": exercise_name, "position": 0}],
+            },
+            headers=client_headers,
+        )
+        assert response.status_code == 201
+
+    first_page = client_training_api_client.get(
+        "/client/training/workout-logs?limit=30&offset=0",
+        headers=client_headers,
+    )
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert first_payload["count"] == 30
+    assert first_payload["items"][0]["exercise_entries"][0]["exercise_name"] == (
+        "Standalone Exercise 30"
+    )
+    assert first_payload["next_offset"] == 30
+    assert first_payload["has_more"] is True
+
+    second_page = client_training_api_client.get(
+        "/client/training/workout-logs?limit=30&offset=30",
+        headers=client_headers,
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert second_payload["count"] == 1
+    assert second_payload["items"][0]["exercise_entries"][0]["exercise_name"] == (
+        "Standalone Exercise 0"
+    )
+    assert second_payload["next_offset"] is None
+    assert second_payload["has_more"] is False
+
+    search_response = client_training_api_client.get(
+        "/client/training/workout-logs?search=Target%20Standalone%20Search%20Exercise",
+        headers=client_headers,
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.json()
+    assert search_payload["count"] == 1
+    assert search_payload["items"][0]["exercise_entries"][0]["exercise_name"] == (
+        "Target Standalone Search Exercise"
     )

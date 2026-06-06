@@ -18,6 +18,7 @@ from mealmetric.services.training_service import (
     AssignmentService,
     ChecklistItemInput,
     ChecklistService,
+    ClientTrainingService,
     PackageRoutineInput,
     PtClientLinkService,
     PtFolderService,
@@ -342,6 +343,55 @@ def test_workout_log_service_persists_structured_exercise_entries() -> None:
         assert workout_log.exercise_entries[1].duration_seconds == 90
 
 
+@pytest.mark.parametrize(
+    ("mode", "exercise_name"),
+    [
+        (WorkoutLogMode.REP, "Standalone Rep"),
+        (WorkoutLogMode.SET, "Standalone Set"),
+        (WorkoutLogMode.GENERAL_WORKOUT, "Standalone General"),
+    ],
+)
+def test_client_training_service_allows_standalone_workout_logs(
+    mode: WorkoutLogMode,
+    exercise_name: str,
+) -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        client = _create_user(db, email=f"{mode.value}-client@example.com", role=Role.CLIENT)
+        service = ClientTrainingService(db)
+
+        workout_log = service.create_workout_log_for_client(
+            client_user_id=client.id,
+            mode=mode,
+            performed_at=datetime(2026, 3, 16, 12, 0, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[
+                WorkoutLogExerciseEntryInput(
+                    exercise_name=exercise_name,
+                    position=0,
+                )
+            ],
+        )
+
+        assert workout_log.id is not None
+        assert workout_log.client_user_id == client.id
+        assert workout_log.pt_user_id is None
+        assert workout_log.assignment_id is None
+        assert workout_log.routine_id is None
+        assert workout_log.mode == mode
+
+        history_page = service.list_workout_log_page_for_client(
+            client_user_id=client.id,
+            limit=30,
+            offset=0,
+            mode=mode,
+            search=exercise_name,
+        )
+        assert len(history_page.items) == 1
+        assert history_page.items[0].id == workout_log.id
+        assert history_page.items[0].mode == mode
+
+
 def test_workout_log_service_rejects_empty_structured_exercise_entry() -> None:
     session_local = _build_sqlite_sessionmaker()
     with session_local() as db:
@@ -471,6 +521,63 @@ def test_workout_log_service_supports_mode_filter_search_and_pagination() -> Non
         )
         assert len(search_page.items) == 1
         assert search_page.items[0].mode == WorkoutLogMode.GENERAL_WORKOUT
+
+
+def test_standalone_workout_logs_support_search_and_pagination() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        client = _create_user(db, email="client-standalone-history@example.com", role=Role.CLIENT)
+        service = ClientTrainingService(db)
+
+        for index in range(31):
+            exercise_name = (
+                "Target Standalone Search Exercise"
+                if index == 5
+                else f"Standalone Exercise {index}"
+            )
+            service.create_workout_log_for_client(
+                client_user_id=client.id,
+                mode=WorkoutLogMode.GENERAL_WORKOUT,
+                performed_at=datetime(2026, 3, 20, 12, index, tzinfo=UTC),
+                completion_status=WorkoutCompletionStatus.COMPLETED,
+                exercise_entries=[
+                    WorkoutLogExerciseEntryInput(
+                        exercise_name=exercise_name,
+                        position=0,
+                    )
+                ],
+            )
+
+        first_page = service.list_workout_log_page_for_client(
+            client_user_id=client.id,
+            limit=30,
+            offset=0,
+        )
+        assert len(first_page.items) == 30
+        assert first_page.items[0].exercise_entries[0].exercise_name == "Standalone Exercise 30"
+        assert first_page.has_more is True
+        assert first_page.next_offset == 30
+
+        second_page = service.list_workout_log_page_for_client(
+            client_user_id=client.id,
+            limit=30,
+            offset=30,
+        )
+        assert len(second_page.items) == 1
+        assert second_page.items[0].exercise_entries[0].exercise_name == "Standalone Exercise 0"
+        assert second_page.has_more is False
+        assert second_page.next_offset is None
+
+        search_page = service.list_workout_log_page_for_client(
+            client_user_id=client.id,
+            limit=30,
+            offset=0,
+            search="Target Standalone Search Exercise",
+        )
+        assert len(search_page.items) == 1
+        assert search_page.items[0].exercise_entries[0].exercise_name == (
+            "Target Standalone Search Exercise"
+        )
 
 
 def test_archive_and_update_behaviors() -> None:

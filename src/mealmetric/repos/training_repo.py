@@ -532,7 +532,7 @@ def create_workout_log(
     session: Session,
     *,
     client_user_id: uuid.UUID,
-    pt_user_id: uuid.UUID,
+    pt_user_id: uuid.UUID | None,
     assignment_id: uuid.UUID | None,
     routine_id: uuid.UUID | None,
     performed_at: datetime,

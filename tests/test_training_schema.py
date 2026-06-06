@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from mealmetric.db.base import Base
 from mealmetric.models.training import (
+    AssignmentStatus,
     ChecklistItem,
     ClientTrainingPackageAssignment,
     PtClientLink,
@@ -20,8 +21,11 @@ from mealmetric.models.training import (
     PtFolder,
     Routine,
     TrainingPackage,
+    TrainingPackageStatus,
+    WorkoutCompletionStatus,
     WorkoutLog,
     WorkoutLogExerciseEntry,
+    WorkoutLogMode,
 )
 from mealmetric.models.user import Role, User
 
@@ -196,6 +200,68 @@ def test_workout_log_mode_migration_upgrade_and_downgrade() -> None:
         assert "mode" not in remaining_columns
 
 
+def test_standalone_workout_logs_migration_lineage() -> None:
+    standalone_module = cast(
+        Any,
+        _load_migration_module(
+            "7b3c4d5e6f7a_allow_standalone_client_workout_logs.py",
+            "phase_h1_standalone_workout_logs",
+        ),
+    )
+    assert standalone_module.down_revision == "fa9c1d2e3b4a"
+
+
+def test_standalone_workout_logs_migration_upgrade_and_downgrade() -> None:
+    standalone_module = cast(
+        Any,
+        _load_migration_module(
+            "7b3c4d5e6f7a_allow_standalone_client_workout_logs.py",
+            "phase_h1_standalone_workout_logs_upgrade",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE workout_logs (
+                    id UUID NOT NULL PRIMARY KEY,
+                    pt_user_id UUID NOT NULL,
+                    assignment_id UUID NULL,
+                    routine_id UUID NULL,
+                    CONSTRAINT ck_workout_logs_assignment_or_routine_required
+                    CHECK (assignment_id IS NOT NULL OR routine_id IS NOT NULL)
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            standalone_module.upgrade()
+
+        inspector = sa.inspect(conn)
+        columns = {column["name"]: column for column in inspector.get_columns("workout_logs")}
+        assert columns["pt_user_id"]["nullable"] is True
+        check_constraints = {
+            constraint["name"] for constraint in inspector.get_check_constraints("workout_logs")
+        }
+        assert "ck_workout_logs_assignment_or_routine_required" not in check_constraints
+
+        with Operations.context(MigrationContext.configure(conn)):
+            standalone_module.downgrade()
+
+        downgraded_columns = {
+            column["name"]: column for column in sa.inspect(conn).get_columns("workout_logs")
+        }
+        assert downgraded_columns["pt_user_id"]["nullable"] is False
+        downgraded_checks = {
+            constraint["name"]
+            for constraint in sa.inspect(conn).get_check_constraints("workout_logs")
+        }
+        assert "ck_workout_logs_assignment_or_routine_required" in downgraded_checks
+
+
 def test_training_tables_registered_in_metadata() -> None:
     expected_tables = {
         "pt_profiles",
@@ -210,6 +276,20 @@ def test_training_tables_registered_in_metadata() -> None:
         "workout_log_exercise_entries",
     }
     assert expected_tables.issubset(set(Base.metadata.tables))
+
+
+def test_training_enums_persist_lowercase_values() -> None:
+    assert PtClientLink.__table__.c.status.type.enums == [status.value for status in PtClientLinkStatus]
+    assert TrainingPackage.__table__.c.status.type.enums == [
+        status.value for status in TrainingPackageStatus
+    ]
+    assert ClientTrainingPackageAssignment.__table__.c.status.type.enums == [
+        status.value for status in AssignmentStatus
+    ]
+    assert WorkoutLog.__table__.c.mode.type.enums == [mode.value for mode in WorkoutLogMode]
+    assert WorkoutLog.__table__.c.completion_status.type.enums == [
+        status.value for status in WorkoutCompletionStatus
+    ]
 
 
 def test_mismatched_pt_client_assignment_rejected() -> None:
@@ -247,28 +327,33 @@ def test_mismatched_pt_client_assignment_rejected() -> None:
         db.rollback()
 
 
-def test_orphan_workout_log_rejected() -> None:
+def test_standalone_workout_log_without_anchor_is_allowed() -> None:
     session_local = _build_sqlite_sessionmaker()
 
     with session_local() as db:
-        pt = User(email="pt-log@example.com", password_hash="hash", role=Role.PT)
         client = User(email="client-log@example.com", password_hash="hash", role=Role.CLIENT)
-        db.add_all([pt, client])
+        db.add(client)
         db.flush()
-        db.commit()
 
-        orphan_log = WorkoutLog(
+        standalone_log = WorkoutLog(
             client_user_id=client.id,
-            pt_user_id=pt.id,
+            pt_user_id=None,
             assignment_id=None,
             routine_id=None,
             performed_at=datetime(2026, 3, 16, 12, 0, tzinfo=UTC),
+            mode=WorkoutLogMode.GENERAL_WORKOUT,
+            completion_status=WorkoutCompletionStatus.COMPLETED,
         )
-        db.add(orphan_log)
+        db.add(standalone_log)
+        db.commit()
 
-        with pytest.raises(IntegrityError):
-            db.commit()
-        db.rollback()
+        db.refresh(standalone_log)
+        assert standalone_log.pt_user_id is None
+        assert standalone_log.assignment_id is None
+        assert standalone_log.routine_id is None
+        row = db.execute(text("SELECT mode, completion_status FROM workout_logs")).one()
+        assert row.mode == WorkoutLogMode.GENERAL_WORKOUT.value
+        assert row.completion_status == WorkoutCompletionStatus.COMPLETED.value
 
 
 def test_checklist_item_owner_constraint_still_enforced() -> None:
