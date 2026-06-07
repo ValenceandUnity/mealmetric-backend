@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from mealmetric.api.schemas.metrics import OverviewMetricsResponse
 from mealmetric.models.training import (
     AssignmentStatus,
+    PtClientInvitationStatus,
     PtClientLinkStatus,
     TrainingPackageStatus,
 )
@@ -93,6 +94,27 @@ class PTClientLinkCreateRequest(BaseModel):
 
 class PTClientLinkStatusUpdateRequest(BaseModel):
     status: PtClientLinkStatus
+
+
+class PTClientInvitationRead(BaseModel):
+    id: uuid.UUID
+    pt_user_id: uuid.UUID
+    client_user_id: uuid.UUID
+    pt_email: str
+    client_email: str
+    client_email_snapshot: str | None
+    status: PtClientInvitationStatus
+    created_at: datetime
+    responded_at: datetime | None
+
+
+class PTClientInvitationListResponse(BaseModel):
+    items: list[PTClientInvitationRead]
+    count: int
+
+
+class PTClientInvitationCreateRequest(BaseModel):
+    client_email: str = Field(min_length=3, max_length=255)
 
 
 class PTRosterCategoryRead(BaseModel):

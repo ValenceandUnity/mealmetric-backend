@@ -16,6 +16,7 @@ from mealmetric.db.base import Base
 from mealmetric.db.session import get_db
 from mealmetric.models.training import (
     AssignmentStatus,
+    PtClientInvitationStatus,
     PtClientLinkStatus,
     TrainingPackageStatus,
 )
@@ -64,6 +65,22 @@ def training_api_client() -> Generator[TestClient, None, None]:
 
 def _register_token(client: TestClient, bff_headers: dict[str, str], role: str) -> str:
     email = f"{role}-{uuid4()}@example.com"
+    response = client.post(
+        "/auth/register",
+        json={"email": email, "password": "securepass1", "role": role},
+        headers=bff_headers,
+    )
+    assert response.status_code == 201
+    return str(response.json()["access_token"])
+
+
+def _register_token_for_email(
+    client: TestClient,
+    bff_headers: dict[str, str],
+    *,
+    email: str,
+    role: str,
+) -> str:
     response = client.post(
         "/auth/register",
         json={"email": email, "password": "securepass1", "role": role},
@@ -243,6 +260,158 @@ def test_pt_roster_categories_list_create_assign_and_filter_clients(
     )
     assert cross_pt_category_list.status_code == 404
     assert cross_pt_category_list.json() == {"detail": "pt_roster_category_not_found"}
+
+
+def test_pt_client_invitation_send_list_and_accept_flow(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_email = "roshi@example.com"
+    client_email = "goku@example.com"
+    pt_token = _register_token_for_email(
+        training_api_client,
+        bff_headers,
+        email=pt_email,
+        role="pt",
+    )
+    client_token = _register_token_for_email(
+        training_api_client,
+        bff_headers,
+        email=client_email,
+        role="client",
+    )
+    pt_headers = {"Authorization": f"Bearer {pt_token}", **bff_headers}
+    client_headers = {"Authorization": f"Bearer {client_token}", **bff_headers}
+    client_user_id = _current_user_id(training_api_client, client_headers)
+
+    invite_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": client_email},
+        headers=pt_headers,
+    )
+    assert invite_response.status_code == 201
+    invite_payload = invite_response.json()
+    invitation_id = invite_payload["id"]
+    assert invite_payload["status"] == PtClientInvitationStatus.PENDING.value
+    assert invite_payload["client_email"] == client_email
+    assert invite_payload["pt_email"] == pt_email
+
+    duplicate_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": client_email},
+        headers=pt_headers,
+    )
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json() == {"detail": "pt_client_invitation_pending"}
+
+    pt_list_response = training_api_client.get("/pt/client-invitations", headers=pt_headers)
+    assert pt_list_response.status_code == 200
+    assert pt_list_response.json()["count"] == 1
+
+    client_list_response = training_api_client.get("/client/invitations", headers=client_headers)
+    assert client_list_response.status_code == 200
+    assert client_list_response.json()["count"] == 1
+    assert client_list_response.json()["items"][0]["id"] == invitation_id
+
+    roster_before_acceptance = training_api_client.get("/pt/clients", headers=pt_headers)
+    assert roster_before_acceptance.status_code == 200
+    assert roster_before_acceptance.json()["count"] == 0
+
+    accept_response = training_api_client.post(
+        f"/client/invitations/{invitation_id}/accept",
+        headers=client_headers,
+    )
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == PtClientInvitationStatus.ACCEPTED.value
+
+    roster_after_acceptance = training_api_client.get("/pt/clients", headers=pt_headers)
+    assert roster_after_acceptance.status_code == 200
+    assert roster_after_acceptance.json()["count"] == 1
+    assert roster_after_acceptance.json()["items"][0]["client_user_id"] == str(client_user_id)
+
+
+def test_pt_client_invitation_rejects_missing_email_non_client_and_self(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_email = "masterroshi@example.com"
+    pt_token = _register_token_for_email(
+        training_api_client,
+        bff_headers,
+        email=pt_email,
+        role="pt",
+    )
+    other_pt_token = _register_token_for_email(
+        training_api_client,
+        bff_headers,
+        email="krillin-coach@example.com",
+        role="pt",
+    )
+    _ = other_pt_token
+    _register_token_for_email(
+        training_api_client,
+        bff_headers,
+        email="bulma@example.com",
+        role="client",
+    )
+    pt_headers = {"Authorization": f"Bearer {pt_token}", **bff_headers}
+
+    missing_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": "missing@example.com"},
+        headers=pt_headers,
+    )
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {"detail": "client_user_not_found"}
+
+    non_client_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": "krillin-coach@example.com"},
+        headers=pt_headers,
+    )
+    assert non_client_response.status_code == 422
+    assert non_client_response.json() == {"detail": "client_role_required"}
+
+    self_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": pt_email},
+        headers=pt_headers,
+    )
+    assert self_response.status_code == 422
+    assert self_response.json() == {"detail": "pt_client_invitation_self_forbidden"}
+
+
+def test_client_invitation_decline_and_scope_protection(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    other_client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    client_email = training_api_client.get("/auth/me", headers=client_headers).json()["email"]
+
+    invite_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": client_email},
+        headers=pt_headers,
+    )
+    assert invite_response.status_code == 201
+    invitation_id = invite_response.json()["id"]
+
+    other_client_response = training_api_client.post(
+        f"/client/invitations/{invitation_id}/accept",
+        headers=other_client_headers,
+    )
+    assert other_client_response.status_code == 404
+    assert other_client_response.json() == {"detail": "pt_client_invitation_not_found"}
+
+    decline_response = training_api_client.post(
+        f"/client/invitations/{invitation_id}/decline",
+        headers=client_headers,
+    )
+    assert decline_response.status_code == 200
+    assert decline_response.json()["status"] == PtClientInvitationStatus.DECLINED.value
+
+    roster_response = training_api_client.get("/pt/clients", headers=pt_headers)
+    assert roster_response.status_code == 200
+    assert roster_response.json()["count"] == 0
 
 def test_pt_client_detail_returns_profile_assignments_and_metrics(
     training_api_client: TestClient, bff_headers: dict[str, str]
@@ -437,6 +606,63 @@ def test_pt_can_list_client_workout_logs_with_structured_entries(
     assert payload["items"][0]["exercise_entries"][1]["notes"] == "Per leg finisher"
 
 
+def test_pt_can_view_client_standalone_logs_after_invitation_acceptance(
+    training_api_client: TestClient, bff_headers: dict[str, str]
+) -> None:
+    pt_headers = _headers_for_role(training_api_client, bff_headers, "pt")
+    client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+
+    client_user_id = _current_user_id(training_api_client, client_headers)
+    client_email = training_api_client.get("/auth/me", headers=client_headers).json()["email"]
+
+    create_log_response = training_api_client.post(
+        "/client/training/workout-logs",
+        json={
+            "mode": "general_workout",
+            "performed_at": "2026-03-18T13:30:00Z",
+            "completion_status": "completed",
+            "exercise_entries": [
+                {
+                    "position": 0,
+                    "exercise_name": "Invite Flow Standalone Workout",
+                    "sets": 3,
+                    "reps": 10,
+                    "weight": "135.00",
+                }
+            ],
+        },
+        headers=client_headers,
+    )
+    assert create_log_response.status_code == 201
+
+    invite_response = training_api_client.post(
+        "/pt/client-invitations",
+        json={"client_email": client_email},
+        headers=pt_headers,
+    )
+    assert invite_response.status_code == 201
+    invitation_id = invite_response.json()["id"]
+
+    accept_response = training_api_client.post(
+        f"/client/invitations/{invitation_id}/accept",
+        headers=client_headers,
+    )
+    assert accept_response.status_code == 200
+
+    response = training_api_client.get(
+        f"/pt/clients/{client_user_id}/workout-logs",
+        headers=pt_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["pt_user_id"] is None
+    assert payload["items"][0]["mode"] == "general_workout"
+    assert payload["items"][0]["exercise_entries"][0]["exercise_name"] == (
+        "Invite Flow Standalone Workout"
+    )
+
+
 def test_pt_client_workout_logs_require_legitimate_scope(
     training_api_client: TestClient, bff_headers: dict[str, str]
 ) -> None:
@@ -458,6 +684,22 @@ def test_pt_client_workout_logs_require_legitimate_scope(
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "workout_logs_not_in_scope"}
+
+    pending_client_headers = _headers_for_role(training_api_client, bff_headers, "client")
+    pending_client_user_id = _current_user_id(training_api_client, pending_client_headers)
+    pending_link_response = training_api_client.post(
+        "/pt/clients/links",
+        json={"client_user_id": str(pending_client_user_id), "status": "pending"},
+        headers=pt1_headers,
+    )
+    assert pending_link_response.status_code == 201
+
+    pending_scope_response = training_api_client.get(
+        f"/pt/clients/{pending_client_user_id}/workout-logs",
+        headers=pt1_headers,
+    )
+    assert pending_scope_response.status_code == 403
+    assert pending_scope_response.json() == {"detail": "workout_logs_not_in_scope"}
 
 
 def test_pt_can_update_workout_log_notes_for_valid_client(

@@ -8,6 +8,7 @@ from mealmetric.api.admin_vendors import router as admin_vendors_router
 from mealmetric.api.bff import router as bff_router
 from mealmetric.api.checkout import router as checkout_router
 from mealmetric.api.client_bookmarks import router as client_bookmarks_router
+from mealmetric.api.client_invitations import router as client_invitations_router
 from mealmetric.api.client_meal_plan_recommendations import (
     router as client_meal_plan_recommendations_router,
 )
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(pt_meal_plans_router)
     app.include_router(pt_meal_plan_recommendations_router)
     app.include_router(client_training_router)
+    app.include_router(client_invitations_router)
     app.include_router(client_metrics_router)
     app.include_router(client_orders_router)
     app.include_router(client_subscriptions_router)

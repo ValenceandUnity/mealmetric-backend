@@ -61,6 +61,25 @@ def get_notification_for_user(
     return session.scalar(stmt)
 
 
+def list_notifications_for_related_entity(
+    session: Session,
+    *,
+    recipient_user_id: uuid.UUID,
+    related_entity_type: str,
+    related_entity_id: str,
+) -> list[Notification]:
+    stmt: Select[tuple[Notification]] = (
+        select(Notification)
+        .where(
+            Notification.recipient_user_id == recipient_user_id,
+            Notification.related_entity_type == related_entity_type,
+            Notification.related_entity_id == related_entity_id,
+        )
+        .order_by(Notification.created_at.desc(), Notification.id.desc())
+    )
+    return list(session.scalars(stmt))
+
+
 def save_notification(session: Session, notification: Notification) -> Notification:
     session.add(notification)
     session.flush()

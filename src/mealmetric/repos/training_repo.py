@@ -11,6 +11,8 @@ from mealmetric.models.training import (
     AssignmentStatus,
     ChecklistItem,
     ClientTrainingPackageAssignment,
+    PtClientInvitation,
+    PtClientInvitationStatus,
     PtClientLink,
     PtClientLinkStatus,
     PtFolder,
@@ -148,6 +150,111 @@ def create_pt_client_link(
     session.add(link)
     session.flush()
     return link
+
+
+def get_pt_client_invitation_by_id(
+    session: Session,
+    invitation_id: uuid.UUID,
+) -> PtClientInvitation | None:
+    stmt: Select[tuple[PtClientInvitation]] = select(PtClientInvitation).where(
+        PtClientInvitation.id == invitation_id
+    )
+    return session.scalar(stmt)
+
+
+def get_pt_client_invitation_for_pt(
+    session: Session,
+    *,
+    invitation_id: uuid.UUID,
+    pt_user_id: uuid.UUID,
+) -> PtClientInvitation | None:
+    stmt: Select[tuple[PtClientInvitation]] = select(PtClientInvitation).where(
+        PtClientInvitation.id == invitation_id,
+        PtClientInvitation.pt_user_id == pt_user_id,
+    )
+    return session.scalar(stmt)
+
+
+def get_pt_client_invitation_for_client(
+    session: Session,
+    *,
+    invitation_id: uuid.UUID,
+    client_user_id: uuid.UUID,
+) -> PtClientInvitation | None:
+    stmt: Select[tuple[PtClientInvitation]] = select(PtClientInvitation).where(
+        PtClientInvitation.id == invitation_id,
+        PtClientInvitation.client_user_id == client_user_id,
+    )
+    return session.scalar(stmt)
+
+
+def get_pending_pt_client_invitation_by_pair(
+    session: Session,
+    *,
+    pt_user_id: uuid.UUID,
+    client_user_id: uuid.UUID,
+) -> PtClientInvitation | None:
+    stmt: Select[tuple[PtClientInvitation]] = (
+        select(PtClientInvitation)
+        .where(
+            PtClientInvitation.pt_user_id == pt_user_id,
+            PtClientInvitation.client_user_id == client_user_id,
+            PtClientInvitation.status == PtClientInvitationStatus.PENDING,
+        )
+        .order_by(PtClientInvitation.created_at.desc(), PtClientInvitation.id.desc())
+    )
+    return session.scalar(stmt)
+
+
+def list_pt_client_invitations_for_pt(
+    session: Session,
+    pt_user_id: uuid.UUID,
+) -> list[PtClientInvitation]:
+    stmt: Select[tuple[PtClientInvitation]] = (
+        select(PtClientInvitation)
+        .where(PtClientInvitation.pt_user_id == pt_user_id)
+        .order_by(PtClientInvitation.created_at.desc(), PtClientInvitation.id.desc())
+    )
+    return list(session.scalars(stmt))
+
+
+def list_pt_client_invitations_for_client(
+    session: Session,
+    client_user_id: uuid.UUID,
+) -> list[PtClientInvitation]:
+    stmt: Select[tuple[PtClientInvitation]] = (
+        select(PtClientInvitation)
+        .where(PtClientInvitation.client_user_id == client_user_id)
+        .order_by(PtClientInvitation.created_at.desc(), PtClientInvitation.id.desc())
+    )
+    return list(session.scalars(stmt))
+
+
+def create_pt_client_invitation(
+    session: Session,
+    *,
+    pt_user_id: uuid.UUID,
+    client_user_id: uuid.UUID,
+    client_email_snapshot: str | None,
+) -> PtClientInvitation:
+    invitation = PtClientInvitation(
+        pt_user_id=pt_user_id,
+        client_user_id=client_user_id,
+        client_email_snapshot=client_email_snapshot,
+        status=PtClientInvitationStatus.PENDING,
+    )
+    session.add(invitation)
+    session.flush()
+    return invitation
+
+
+def save_pt_client_invitation(
+    session: Session,
+    invitation: PtClientInvitation,
+) -> PtClientInvitation:
+    session.add(invitation)
+    session.flush()
+    return invitation
 
 
 def save_pt_client_link(session: Session, link: PtClientLink) -> PtClientLink:
@@ -793,8 +900,11 @@ def list_workout_logs_for_pt_client(
     logs, _ = _list_workout_logs_page(
         session,
         where_clauses=[
-            WorkoutLog.pt_user_id == pt_user_id,
             WorkoutLog.client_user_id == client_user_id,
+            or_(
+                WorkoutLog.pt_user_id == pt_user_id,
+                WorkoutLog.pt_user_id.is_(None),
+            ),
         ],
         limit=10_000,
         offset=0,
@@ -815,8 +925,11 @@ def list_workout_logs_for_pt_client_page(
     return _list_workout_logs_page(
         session,
         where_clauses=[
-            WorkoutLog.pt_user_id == pt_user_id,
             WorkoutLog.client_user_id == client_user_id,
+            or_(
+                WorkoutLog.pt_user_id == pt_user_id,
+                WorkoutLog.pt_user_id.is_(None),
+            ),
         ],
         limit=limit,
         offset=offset,

@@ -3,7 +3,7 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from mealmetric.api.deps.auth import (
@@ -32,6 +32,9 @@ from mealmetric.api.schemas.training import (
     PackageRoutineRead,
     PackageRoutineReplaceRequest,
     PTClientDetailRead,
+    PTClientInvitationCreateRequest,
+    PTClientInvitationListResponse,
+    PTClientInvitationRead,
     PTClientLinkCreateRequest,
     PTClientLinkListResponse,
     PTClientLinkRead,
@@ -73,6 +76,7 @@ from mealmetric.models.training import (
     TrainingPackage,
     TrainingPackageRoutine,
     WorkoutLog,
+    WorkoutLogMode,
 )
 from mealmetric.models.user import Role, User
 from mealmetric.services.metrics_service import MetricsFreshness, OverviewMetricsView
@@ -82,6 +86,8 @@ from mealmetric.services.training_service import (
     ChecklistService,
     PackageRoutineInput,
     PTClientDetailView,
+    PtClientInvitationService,
+    PTClientInvitationView,
     PtClientLinkService,
     PTDashboardClientSummaryView,
     PtFolderService,
@@ -170,6 +176,21 @@ def _client_link_to_read(link: PtClientLink) -> PTClientLinkRead:
         notes=link.notes,
         created_at=link.created_at,
         updated_at=link.updated_at,
+    )
+
+
+def _client_invitation_to_read(view: PTClientInvitationView) -> PTClientInvitationRead:
+    invitation = view.invitation
+    return PTClientInvitationRead(
+        id=invitation.id,
+        pt_user_id=invitation.pt_user_id,
+        client_user_id=invitation.client_user_id,
+        pt_email=view.pt_email,
+        client_email=view.client_email,
+        client_email_snapshot=invitation.client_email_snapshot,
+        status=invitation.status,
+        created_at=invitation.created_at,
+        responded_at=invitation.responded_at,
     )
 
 
@@ -469,6 +490,40 @@ def list_pt_client_links(
     links = service.list_for_pt(current_user.id)
     items = [_client_link_to_read(link) for link in links]
     return PTClientLinkListResponse(items=items, count=len(items))
+
+
+@router.get("/client-invitations", response_model=PTClientInvitationListResponse)
+def list_pt_client_invitations(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> PTClientInvitationListResponse:
+    session = _require_db(db)
+    service = PtClientInvitationService(session)
+    items = [_client_invitation_to_read(item) for item in service.list_for_pt(current_user.id)]
+    return PTClientInvitationListResponse(items=items, count=len(items))
+
+
+@router.post(
+    "/client-invitations",
+    response_model=PTClientInvitationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_pt_client_invitation(
+    payload: PTClientInvitationCreateRequest,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> PTClientInvitationRead:
+    session = _require_db(db)
+    service = PtClientInvitationService(session)
+
+    def _operation() -> PTClientInvitationView:
+        return service.create_invitation(
+            pt_user_id=current_user.id,
+            client_email=payload.client_email,
+        )
+
+    invitation = _run_mutation(session, _operation)
+    return _client_invitation_to_read(invitation)
 
 
 @router.post(
@@ -1037,25 +1092,33 @@ def list_client_workout_logs(
     client_user_id: UUID,
     db: DBSessionDep,
     current_user: CurrentUserDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    mode: WorkoutLogMode | None = None,
+    search: str | None = None,
 ) -> ClientWorkoutLogListResponse:
     session = _require_db(db)
     service = WorkoutLogService(session)
     try:
-        workout_logs = service.list_workout_logs_for_client(
+        page = service.list_workout_log_page_for_client(
             requester_user_id=current_user.id,
             client_user_id=client_user_id,
+            limit=limit,
+            offset=offset,
+            mode=mode,
+            search=search,
         )
     except (TrainingNotFoundError, TrainingPermissionError, TrainingValidationError) as exc:
         raise _translate_service_error(exc) from exc
 
-    items = [_workout_log_to_read(workout_log) for workout_log in workout_logs]
+    items = [_workout_log_to_read(workout_log) for workout_log in page.items]
     return ClientWorkoutLogListResponse(
         items=items,
         count=len(items),
-        limit=len(items),
-        offset=0,
-        next_offset=None,
-        has_more=False,
+        limit=page.limit,
+        offset=page.offset,
+        next_offset=page.next_offset,
+        has_more=page.has_more,
     )
 
 

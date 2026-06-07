@@ -39,6 +39,13 @@ class PtClientLinkStatus(StrEnum):
     ENDED = "ended"
 
 
+class PtClientInvitationStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    REVOKED = "revoked"
+
+
 class TrainingPackageStatus(StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
@@ -158,6 +165,45 @@ class PtClientLink(Base):
         "PtRosterCategory",
         back_populates="client_links",
     )
+
+
+class PtClientInvitation(Base):
+    __tablename__ = "pt_client_invitations"
+    __table_args__ = (
+        CheckConstraint("pt_user_id <> client_user_id", name="ck_pt_client_invitations_no_self_invite"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pt_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    client_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    client_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[PtClientInvitationStatus] = mapped_column(
+        Enum(
+            PtClientInvitationStatus,
+            name="pt_client_invitation_status",
+            native_enum=False,
+            create_constraint=True,
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=PtClientInvitationStatus.PENDING,
+        server_default=PtClientInvitationStatus.PENDING.value,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PtRosterCategory(Base):

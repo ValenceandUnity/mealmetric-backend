@@ -220,3 +220,79 @@ def test_notifications_mark_read_hides_cross_user_resource(bff_headers: dict[str
         assert forbidden_response.json() == {"detail": "notification_not_found"}
     finally:
         client.close()
+
+
+def test_invitation_notifications_flow_through_client_and_pt_inboxes(
+    bff_headers: dict[str, str],
+) -> None:
+    client = _create_memory_client()
+    try:
+        pt_headers = _headers_for_role(client, bff_headers, "pt")
+        client_headers = _headers_for_role(client, bff_headers, "client")
+        client_email = client.get("/auth/me", headers=client_headers).json()["email"]
+
+        invite_response = client.post(
+            "/pt/client-invitations",
+            json={"client_email": client_email},
+            headers=pt_headers,
+        )
+        assert invite_response.status_code == 201
+        invitation_id = invite_response.json()["id"]
+
+        unread_after_send = client.get("/notifications/unread-count", headers=client_headers)
+        assert unread_after_send.status_code == 200
+        assert unread_after_send.json()["count"] == 1
+
+        client_notifications = client.get("/notifications", headers=client_headers)
+        assert client_notifications.status_code == 200
+        invite_types = [item["type"] for item in client_notifications.json()["items"]]
+        assert invite_types == ["pt_client_invitation_received"]
+
+        accept_response = client.post(
+            f"/client/invitations/{invitation_id}/accept",
+            headers=client_headers,
+        )
+        assert accept_response.status_code == 200
+
+        unread_after_accept = client.get("/notifications/unread-count", headers=client_headers)
+        assert unread_after_accept.status_code == 200
+        assert unread_after_accept.json()["count"] == 0
+
+        pt_notifications = client.get("/notifications", headers=pt_headers)
+        assert pt_notifications.status_code == 200
+        assert pt_notifications.json()["count"] == 1
+        assert pt_notifications.json()["items"][0]["type"] == "pt_client_invitation_accepted"
+    finally:
+        client.close()
+
+
+def test_invitation_decline_creates_pt_notification(
+    bff_headers: dict[str, str],
+) -> None:
+    client = _create_memory_client()
+    try:
+        pt_headers = _headers_for_role(client, bff_headers, "pt")
+        client_headers = _headers_for_role(client, bff_headers, "client")
+        client_email = client.get("/auth/me", headers=client_headers).json()["email"]
+
+        invite_response = client.post(
+            "/pt/client-invitations",
+            json={"client_email": client_email},
+            headers=pt_headers,
+        )
+        assert invite_response.status_code == 201
+        invitation_id = invite_response.json()["id"]
+
+        decline_response = client.post(
+            f"/client/invitations/{invitation_id}/decline",
+            headers=client_headers,
+        )
+        assert decline_response.status_code == 200
+        assert decline_response.json()["status"] == "declined"
+
+        pt_notifications = client.get("/notifications", headers=pt_headers)
+        assert pt_notifications.status_code == 200
+        assert pt_notifications.json()["count"] == 1
+        assert pt_notifications.json()["items"][0]["type"] == "pt_client_invitation_declined"
+    finally:
+        client.close()

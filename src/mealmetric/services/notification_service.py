@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -84,3 +85,85 @@ class NotificationService:
             related_entity_type="client_training_package_assignment",
             related_entity_id=str(assignment_id),
         )
+
+    def create_pt_client_invitation_received_notification(
+        self,
+        *,
+        client_user_id: uuid.UUID,
+        pt_user_id: uuid.UUID,
+        pt_email: str,
+        invitation_id: uuid.UUID,
+    ) -> Notification:
+        return notification_repo.create_notification(
+            self._session,
+            recipient_user_id=client_user_id,
+            actor_user_id=pt_user_id,
+            notification_type=NotificationType.PT_CLIENT_INVITATION_RECEIVED,
+            title="Trainer invite received",
+            message=f"{pt_email} invited you to join their PT roster.",
+            related_entity_type="pt_client_invitation",
+            related_entity_id=str(invitation_id),
+        )
+
+    def create_pt_client_invitation_accepted_notification(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        client_user_id: uuid.UUID,
+        client_email: str,
+        invitation_id: uuid.UUID,
+    ) -> Notification:
+        return notification_repo.create_notification(
+            self._session,
+            recipient_user_id=pt_user_id,
+            actor_user_id=client_user_id,
+            notification_type=NotificationType.PT_CLIENT_INVITATION_ACCEPTED,
+            title="Client accepted invite",
+            message=f"{client_email} accepted your PT roster invite.",
+            related_entity_type="pt_client_invitation",
+            related_entity_id=str(invitation_id),
+        )
+
+    def create_pt_client_invitation_declined_notification(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        client_user_id: uuid.UUID,
+        client_email: str,
+        invitation_id: uuid.UUID,
+    ) -> Notification:
+        return notification_repo.create_notification(
+            self._session,
+            recipient_user_id=pt_user_id,
+            actor_user_id=client_user_id,
+            notification_type=NotificationType.PT_CLIENT_INVITATION_DECLINED,
+            title="Client declined invite",
+            message=f"{client_email} declined your PT roster invite.",
+            related_entity_type="pt_client_invitation",
+            related_entity_id=str(invitation_id),
+        )
+
+    def mark_related_entity_notifications_as_read(
+        self,
+        *,
+        recipient_user_id: uuid.UUID,
+        related_entity_type: str,
+        related_entity_id: str,
+    ) -> list[Notification]:
+        notifications = notification_repo.list_notifications_for_related_entity(
+            self._session,
+            recipient_user_id=recipient_user_id,
+            related_entity_type=related_entity_type,
+            related_entity_id=related_entity_id,
+        )
+        return self._mark_notifications_as_read(notifications)
+
+    def _mark_notifications_as_read(self, notifications: Iterable[Notification]) -> list[Notification]:
+        updated: list[Notification] = []
+        for notification in notifications:
+            if notification.is_read:
+                updated.append(notification)
+                continue
+            notification.is_read = True
+            updated.append(notification_repo.save_notification(self._session, notification))
+        return updated

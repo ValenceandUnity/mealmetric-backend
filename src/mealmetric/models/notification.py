@@ -9,10 +9,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 from mealmetric.db.base import Base
 
 
+def _enum_values(enum_cls: type[StrEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class NotificationType(StrEnum):
     CLIENT_WORKOUT_LOGGED = "client_workout_logged"
     PT_WORKOUT_NOTE_ADDED = "pt_workout_note_added"
     PT_ASSIGNMENT_CREATED = "pt_assignment_created"
+    PT_CLIENT_INVITATION_RECEIVED = "pt_client_invitation_received"
+    PT_CLIENT_INVITATION_ACCEPTED = "pt_client_invitation_accepted"
+    PT_CLIENT_INVITATION_DECLINED = "pt_client_invitation_declined"
 
 
 class Notification(Base):
@@ -37,6 +44,7 @@ class Notification(Base):
             name="notification_type",
             native_enum=False,
             create_constraint=True,
+            values_callable=_enum_values,
         ),
         nullable=False,
         index=True,

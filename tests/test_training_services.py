@@ -8,18 +8,21 @@ from mealmetric.db.base import Base
 from mealmetric.models.audit_log import AuditEventAction, AuditEventCategory, AuditLog
 from mealmetric.models.training import (
     AssignmentStatus,
+    PtClientInvitationStatus,
     PtClientLinkStatus,
     TrainingPackageStatus,
     WorkoutCompletionStatus,
     WorkoutLogMode,
 )
 from mealmetric.models.user import Role, User
+from mealmetric.repos import user_repo
 from mealmetric.services.training_service import (
     AssignmentService,
     ChecklistItemInput,
     ChecklistService,
     ClientTrainingService,
     PackageRoutineInput,
+    PtClientInvitationService,
     PtClientLinkService,
     PtFolderService,
     PtProfileService,
@@ -122,6 +125,65 @@ def test_pt_roster_category_assignment_and_scope() -> None:
                 client_user_id=client.id,
                 roster_category_id=category.id,
             )
+
+
+def test_pt_client_invitation_lifecycle_and_duplicate_pending_prevention() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt = _create_user(db, email="roshi@example.com", role=Role.PT)
+        client = _create_user(db, email="goku@example.com", role=Role.CLIENT)
+        service = PtClientInvitationService(db)
+
+        created = service.create_invitation(
+            pt_user_id=pt.id,
+            client_email="  GOKU@example.com  ",
+        )
+        assert created.invitation.status == PtClientInvitationStatus.PENDING
+        assert created.client_email == "goku@example.com"
+
+        with pytest.raises(TrainingConflictError):
+            service.create_invitation(pt_user_id=pt.id, client_email="goku@example.com")
+
+        accepted = service.accept_invitation(
+            client_user_id=client.id,
+            invitation_id=created.invitation.id,
+        )
+        assert accepted.invitation.status == PtClientInvitationStatus.ACCEPTED
+
+        link_service = PtClientLinkService(db)
+        roster_clients = link_service.list_roster_clients(pt.id)
+        assert len(roster_clients) == 1
+        assert roster_clients[0].client_email == "goku@example.com"
+
+
+def test_pt_client_invitation_rejects_invalid_targets() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt = _create_user(db, email="masterroshi@example.com", role=Role.PT)
+        other_pt = _create_user(db, email="krillin-coach@example.com", role=Role.PT)
+        _create_user(db, email="bulma@example.com", role=Role.CLIENT)
+        service = PtClientInvitationService(db)
+
+        with pytest.raises(TrainingNotFoundError):
+            service.create_invitation(pt_user_id=pt.id, client_email="missing@example.com")
+
+        with pytest.raises(TrainingValidationError):
+            service.create_invitation(pt_user_id=pt.id, client_email="krillin-coach@example.com")
+
+        with pytest.raises(TrainingValidationError):
+            service.create_invitation(pt_user_id=pt.id, client_email="masterroshi@example.com")
+
+        link_service = PtClientLinkService(db)
+        existing_client = user_repo.get_by_email(db, "bulma@example.com")
+        assert existing_client is not None
+        link_service.create_link(
+            pt_user_id=other_pt.id,
+            client_user_id=existing_client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+
+        created = service.create_invitation(pt_user_id=pt.id, client_email="bulma@example.com")
+        assert created.invitation.status == PtClientInvitationStatus.PENDING
 
 
 def test_pt_cannot_operate_on_other_pt_folder_routine_or_package() -> None:
@@ -338,6 +400,83 @@ def test_workout_logs_are_scope_filtered() -> None:
                 requester_user_id=pt2.id,
                 client_user_id=client.id,
             )
+
+
+def test_pt_view_includes_standalone_logs_but_not_other_pt_logs() -> None:
+    session_local = _build_sqlite_sessionmaker()
+    with session_local() as db:
+        pt1 = _create_user(db, email="pt1-shared-history@example.com", role=Role.PT)
+        pt2 = _create_user(db, email="pt2-shared-history@example.com", role=Role.PT)
+        client = _create_user(db, email="client-shared-history@example.com", role=Role.CLIENT)
+
+        link_service = PtClientLinkService(db)
+        client_service = ClientTrainingService(db)
+        routine_service = RoutineService(db)
+        workout_service = WorkoutLogService(db)
+
+        link_service.create_link(
+            pt_user_id=pt1.id,
+            client_user_id=client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+        link_service.create_link(
+            pt_user_id=pt2.id,
+            client_user_id=client.id,
+            status=PtClientLinkStatus.ACTIVE,
+        )
+
+        standalone_log = client_service.create_workout_log_for_client(
+            client_user_id=client.id,
+            mode=WorkoutLogMode.GENERAL_WORKOUT,
+            performed_at=datetime(2026, 3, 16, 12, 0, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[
+                WorkoutLogExerciseEntryInput(
+                    exercise_name="Client Standalone Workout",
+                    position=0,
+                )
+            ],
+        )
+        pt1_routine = routine_service.create_routine(pt_user_id=pt1.id, title="PT1 Routine")
+        pt2_routine = routine_service.create_routine(pt_user_id=pt2.id, title="PT2 Routine")
+
+        pt1_log = workout_service.create_workout_log(
+            pt_user_id=pt1.id,
+            client_user_id=client.id,
+            routine_id=pt1_routine.id,
+            performed_at=datetime(2026, 3, 16, 12, 1, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[
+                WorkoutLogExerciseEntryInput(
+                    exercise_name="PT1 Owned Workout",
+                    position=0,
+                )
+            ],
+        )
+        pt2_log = workout_service.create_workout_log(
+            pt_user_id=pt2.id,
+            client_user_id=client.id,
+            routine_id=pt2_routine.id,
+            performed_at=datetime(2026, 3, 16, 12, 2, tzinfo=UTC),
+            completion_status=WorkoutCompletionStatus.COMPLETED,
+            exercise_entries=[
+                WorkoutLogExerciseEntryInput(
+                    exercise_name="PT2 Owned Workout",
+                    position=0,
+                )
+            ],
+        )
+
+        pt1_page = workout_service.list_workout_log_page_for_client(
+            requester_user_id=pt1.id,
+            client_user_id=client.id,
+            limit=30,
+            offset=0,
+        )
+        pt1_log_ids = {item.id for item in pt1_page.items}
+        assert standalone_log.id in pt1_log_ids
+        assert pt1_log.id in pt1_log_ids
+        assert pt2_log.id not in pt1_log_ids
 
 
 def test_workout_log_service_persists_structured_exercise_entries() -> None:

@@ -12,6 +12,8 @@ from mealmetric.models.training import (
     AssignmentStatus,
     ChecklistItem,
     ClientTrainingPackageAssignment,
+    PtClientInvitation,
+    PtClientInvitationStatus,
     PtClientLink,
     PtClientLinkStatus,
     PtFolder,
@@ -123,6 +125,13 @@ class PTDashboardClientSummaryView:
     workout_log_count: int
     latest_workout_log_at: datetime | None
     metrics_snapshot: OverviewMetricsView | None
+
+
+@dataclass(frozen=True, slots=True)
+class PTClientInvitationView:
+    invitation: PtClientInvitation
+    pt_email: str
+    client_email: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,6 +434,217 @@ class PtClientLinkService:
             client_name=client_user.email,
             client_email=client_user.email,
             roster_name=link.roster_category.name if link.roster_category is not None else None,
+        )
+
+
+class PtClientInvitationService:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create_invitation(
+        self,
+        *,
+        pt_user_id: uuid.UUID,
+        client_email: str,
+    ) -> PTClientInvitationView:
+        normalized_email = client_email.strip().lower()
+        if normalized_email == "":
+            raise TrainingValidationError("client_email_required")
+
+        pt_user = user_repo.get_by_id(self._session, pt_user_id)
+        if pt_user is None:
+            raise TrainingNotFoundError("pt_user_not_found")
+        if pt_user.role != Role.PT:
+            raise TrainingPermissionError("pt_role_required")
+
+        client_user = user_repo.get_by_email(self._session, normalized_email)
+        if client_user is None:
+            raise TrainingNotFoundError("client_user_not_found")
+        if client_user.id == pt_user_id:
+            raise TrainingValidationError("pt_client_invitation_self_forbidden")
+        if client_user.role != Role.CLIENT:
+            raise TrainingValidationError("client_role_required")
+
+        existing_link = training_repo.get_pt_client_link_by_pair(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=client_user.id,
+        )
+        if existing_link is not None:
+            raise TrainingConflictError("pt_client_link_already_exists")
+
+        existing_pending_invitation = training_repo.get_pending_pt_client_invitation_by_pair(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=client_user.id,
+        )
+        if existing_pending_invitation is not None:
+            raise TrainingConflictError("pt_client_invitation_pending")
+
+        invitation = training_repo.create_pt_client_invitation(
+            self._session,
+            pt_user_id=pt_user_id,
+            client_user_id=client_user.id,
+            client_email_snapshot=client_user.email,
+        )
+        NotificationService(self._session).create_pt_client_invitation_received_notification(
+            client_user_id=client_user.id,
+            pt_user_id=pt_user_id,
+            pt_email=pt_user.email,
+            invitation_id=invitation.id,
+        )
+        return PTClientInvitationView(
+            invitation=invitation,
+            pt_email=pt_user.email,
+            client_email=client_user.email,
+        )
+
+    def list_for_pt(self, pt_user_id: uuid.UUID) -> list[PTClientInvitationView]:
+        pt_user = user_repo.get_by_id(self._session, pt_user_id)
+        if pt_user is None:
+            raise TrainingNotFoundError("pt_user_not_found")
+
+        views: list[PTClientInvitationView] = []
+        for invitation in training_repo.list_pt_client_invitations_for_pt(self._session, pt_user_id):
+            client_user = user_repo.get_by_id(self._session, invitation.client_user_id)
+            if client_user is None or client_user.role != Role.CLIENT:
+                continue
+            views.append(
+                PTClientInvitationView(
+                    invitation=invitation,
+                    pt_email=pt_user.email,
+                    client_email=client_user.email,
+                )
+            )
+        return views
+
+    def list_for_client(self, client_user_id: uuid.UUID) -> list[PTClientInvitationView]:
+        client_user = user_repo.get_by_id(self._session, client_user_id)
+        if client_user is None:
+            raise TrainingNotFoundError("client_user_not_found")
+
+        views: list[PTClientInvitationView] = []
+        for invitation in training_repo.list_pt_client_invitations_for_client(
+            self._session, client_user_id
+        ):
+            pt_user = user_repo.get_by_id(self._session, invitation.pt_user_id)
+            if pt_user is None or pt_user.role != Role.PT:
+                continue
+            views.append(
+                PTClientInvitationView(
+                    invitation=invitation,
+                    pt_email=pt_user.email,
+                    client_email=client_user.email,
+                )
+            )
+        return views
+
+    def accept_invitation(
+        self,
+        *,
+        client_user_id: uuid.UUID,
+        invitation_id: uuid.UUID,
+    ) -> PTClientInvitationView:
+        invitation = training_repo.get_pt_client_invitation_for_client(
+            self._session,
+            invitation_id=invitation_id,
+            client_user_id=client_user_id,
+        )
+        if invitation is None:
+            raise TrainingNotFoundError("pt_client_invitation_not_found")
+        if invitation.status != PtClientInvitationStatus.PENDING:
+            raise TrainingConflictError("pt_client_invitation_not_pending")
+
+        pt_user = user_repo.get_by_id(self._session, invitation.pt_user_id)
+        client_user = user_repo.get_by_id(self._session, invitation.client_user_id)
+        if pt_user is None or pt_user.role != Role.PT:
+            raise TrainingValidationError("pt_role_required")
+        if client_user is None or client_user.role != Role.CLIENT:
+            raise TrainingValidationError("client_role_required")
+
+        existing_link = training_repo.get_pt_client_link_by_pair(
+            self._session,
+            pt_user_id=invitation.pt_user_id,
+            client_user_id=invitation.client_user_id,
+        )
+        if existing_link is None:
+            training_repo.create_pt_client_link(
+                self._session,
+                pt_user_id=invitation.pt_user_id,
+                client_user_id=invitation.client_user_id,
+                roster_category_id=None,
+                status=PtClientLinkStatus.ACTIVE,
+                notes=None,
+            )
+        elif existing_link.status != PtClientLinkStatus.ACTIVE:
+            existing_link.status = PtClientLinkStatus.ACTIVE
+            existing_link.started_at = existing_link.started_at or datetime.now(UTC)
+            existing_link.ended_at = None
+            training_repo.save_pt_client_link(self._session, existing_link)
+
+        invitation.status = PtClientInvitationStatus.ACCEPTED
+        invitation.responded_at = datetime.now(UTC)
+        updated = training_repo.save_pt_client_invitation(self._session, invitation)
+        notification_service = NotificationService(self._session)
+        notification_service.mark_related_entity_notifications_as_read(
+            recipient_user_id=client_user_id,
+            related_entity_type="pt_client_invitation",
+            related_entity_id=str(invitation.id),
+        )
+        notification_service.create_pt_client_invitation_accepted_notification(
+            pt_user_id=pt_user.id,
+            client_user_id=client_user.id,
+            client_email=client_user.email,
+            invitation_id=invitation.id,
+        )
+        return PTClientInvitationView(
+            invitation=updated,
+            pt_email=pt_user.email,
+            client_email=client_user.email,
+        )
+
+    def decline_invitation(
+        self,
+        *,
+        client_user_id: uuid.UUID,
+        invitation_id: uuid.UUID,
+    ) -> PTClientInvitationView:
+        invitation = training_repo.get_pt_client_invitation_for_client(
+            self._session,
+            invitation_id=invitation_id,
+            client_user_id=client_user_id,
+        )
+        if invitation is None:
+            raise TrainingNotFoundError("pt_client_invitation_not_found")
+        if invitation.status != PtClientInvitationStatus.PENDING:
+            raise TrainingConflictError("pt_client_invitation_not_pending")
+
+        pt_user = user_repo.get_by_id(self._session, invitation.pt_user_id)
+        client_user = user_repo.get_by_id(self._session, invitation.client_user_id)
+        if pt_user is None or pt_user.role != Role.PT:
+            raise TrainingValidationError("pt_role_required")
+        if client_user is None or client_user.role != Role.CLIENT:
+            raise TrainingValidationError("client_role_required")
+
+        invitation.status = PtClientInvitationStatus.DECLINED
+        invitation.responded_at = datetime.now(UTC)
+        updated = training_repo.save_pt_client_invitation(self._session, invitation)
+        notification_service = NotificationService(self._session)
+        notification_service.mark_related_entity_notifications_as_read(
+            recipient_user_id=client_user_id,
+            related_entity_type="pt_client_invitation",
+            related_entity_id=str(invitation.id),
+        )
+        notification_service.create_pt_client_invitation_declined_notification(
+            pt_user_id=pt_user.id,
+            client_user_id=client_user.id,
+            client_email=client_user.email,
+            invitation_id=invitation.id,
+        )
+        return PTClientInvitationView(
+            invitation=updated,
+            pt_email=pt_user.email,
+            client_email=client_user.email,
         )
 
 
@@ -1230,7 +1450,7 @@ class WorkoutLogService:
                 pt_user_id=requester_user_id,
                 client_user_id=client_user_id,
             )
-            if pt_client_link is None:
+            if pt_client_link is None or pt_client_link.status != PtClientLinkStatus.ACTIVE:
                 raise TrainingPermissionError("workout_logs_not_in_scope")
             items, has_more = training_repo.list_workout_logs_for_pt_client_page(
                 self._session,
@@ -1287,7 +1507,7 @@ class WorkoutLogService:
             pt_user_id=pt_user_id,
             client_user_id=workout_log.client_user_id,
         )
-        if pt_client_link is None:
+        if pt_client_link is None or pt_client_link.status != PtClientLinkStatus.ACTIVE:
             raise TrainingPermissionError("workout_logs_not_in_scope")
 
         had_pt_notes = workout_log.pt_notes is not None
