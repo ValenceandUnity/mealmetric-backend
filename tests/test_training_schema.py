@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from mealmetric.db.base import Base
+from mealmetric.models.notification import Notification, NotificationType
 from mealmetric.models.training import (
     AssignmentStatus,
     ChecklistItem,
@@ -543,6 +544,291 @@ def test_pt_roster_categories_migration_downgrade_refuses_with_assignments() -> 
             roster_module.downgrade()
 
 
+def test_pt_client_invitations_migration_lineage() -> None:
+    invite_module = cast(
+        Any,
+        _load_migration_module(
+            "b2c3d4e5f6a7_add_pt_client_invitations.py",
+            "phase_h1_pt_client_invitations",
+        ),
+    )
+    assert invite_module.down_revision == "9d4e5f6a7b8c"
+
+
+def test_pt_client_invitations_migration_upgrade_and_downgrade_without_data() -> None:
+    invite_module = cast(
+        Any,
+        _load_migration_module(
+            "b2c3d4e5f6a7_add_pt_client_invitations.py",
+            "phase_h1_pt_client_invitations_upgrade",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id UUID NOT NULL PRIMARY KEY,
+                    email VARCHAR NOT NULL,
+                    password_hash VARCHAR NOT NULL,
+                    role VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE notifications (
+                    id UUID NOT NULL PRIMARY KEY,
+                    recipient_user_id UUID NOT NULL,
+                    actor_user_id UUID NULL,
+                    type VARCHAR(29) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    message TEXT NOT NULL,
+                    related_entity_type VARCHAR(64) NULL,
+                    related_entity_id VARCHAR(255) NULL,
+                    is_read BOOLEAN NOT NULL DEFAULT (false),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT notification_type CHECK (
+                        type IN (
+                            'client_workout_logged',
+                            'pt_workout_note_added',
+                            'pt_assignment_created'
+                        )
+                    ),
+                    FOREIGN KEY(actor_user_id) REFERENCES users (id) ON DELETE SET NULL,
+                    FOREIGN KEY(recipient_user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            invite_module.upgrade()
+
+        inspector = sa.inspect(conn)
+        assert "pt_client_invitations" in set(inspector.get_table_names())
+        check_constraints = {
+            constraint["name"]: constraint["sqltext"]
+            for constraint in inspector.get_check_constraints("notifications")
+        }
+        assert "notification_type" in check_constraints
+        assert "pt_client_invitation_received" in check_constraints["notification_type"]
+        assert "pt_client_invitation_accepted" in check_constraints["notification_type"]
+        assert "pt_client_invitation_declined" in check_constraints["notification_type"]
+
+        recipient_id = str(uuid4())
+        actor_id = str(uuid4())
+        conn.execute(
+            text(
+                """
+                INSERT INTO users (id, email, password_hash, role)
+                VALUES (:id, :email, :password_hash, :role)
+                """
+            ),
+            [
+                {
+                    "id": recipient_id,
+                    "email": "invite-client@example.com",
+                    "password_hash": "hash",
+                    "role": "client",
+                },
+                {
+                    "id": actor_id,
+                    "email": "invite-pt@example.com",
+                    "password_hash": "hash",
+                    "role": "pt",
+                },
+            ],
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO notifications (
+                    id,
+                    recipient_user_id,
+                    actor_user_id,
+                    type,
+                    title,
+                    message,
+                    related_entity_type,
+                    related_entity_id,
+                    is_read
+                )
+                VALUES (
+                    :id,
+                    :recipient_user_id,
+                    :actor_user_id,
+                    :type,
+                    :title,
+                    :message,
+                    :related_entity_type,
+                    :related_entity_id,
+                    :is_read
+                )
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "recipient_user_id": recipient_id,
+                "actor_user_id": actor_id,
+                "type": "pt_client_invitation_received",
+                "title": "Trainer invite received",
+                "message": "PT invited you.",
+                "related_entity_type": "pt_client_invitation",
+                "related_entity_id": str(uuid4()),
+                "is_read": False,
+            },
+        )
+        conn.execute(
+            text(
+                """
+                DELETE FROM notifications
+                WHERE type = 'pt_client_invitation_received'
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            invite_module.downgrade()
+
+        remaining_tables = set(sa.inspect(conn).get_table_names())
+        assert "pt_client_invitations" not in remaining_tables
+
+
+def test_pt_client_invitations_migration_downgrade_refuses_with_invite_notifications() -> None:
+    invite_module = cast(
+        Any,
+        _load_migration_module(
+            "b2c3d4e5f6a7_add_pt_client_invitations.py",
+            "phase_h1_pt_client_invitations_guard_notification",
+        ),
+    )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id UUID NOT NULL PRIMARY KEY,
+                    email VARCHAR NOT NULL,
+                    password_hash VARCHAR NOT NULL,
+                    role VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE notifications (
+                    id UUID NOT NULL PRIMARY KEY,
+                    recipient_user_id UUID NOT NULL,
+                    actor_user_id UUID NULL,
+                    type VARCHAR(29) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    message TEXT NOT NULL,
+                    related_entity_type VARCHAR(64) NULL,
+                    related_entity_id VARCHAR(255) NULL,
+                    is_read BOOLEAN NOT NULL DEFAULT (false),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT notification_type CHECK (
+                        type IN (
+                            'client_workout_logged',
+                            'pt_workout_note_added',
+                            'pt_assignment_created'
+                        )
+                    ),
+                    FOREIGN KEY(actor_user_id) REFERENCES users (id) ON DELETE SET NULL,
+                    FOREIGN KEY(recipient_user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+
+        with Operations.context(MigrationContext.configure(conn)):
+            invite_module.upgrade()
+
+        recipient_id = str(uuid4())
+        actor_id = str(uuid4())
+        conn.execute(
+            text(
+                """
+                INSERT INTO users (id, email, password_hash, role)
+                VALUES (:id, :email, :password_hash, :role)
+                """
+            ),
+            [
+                {
+                    "id": recipient_id,
+                    "email": "guard-client@example.com",
+                    "password_hash": "hash",
+                    "role": "client",
+                },
+                {
+                    "id": actor_id,
+                    "email": "guard-pt@example.com",
+                    "password_hash": "hash",
+                    "role": "pt",
+                },
+            ],
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO notifications (
+                    id,
+                    recipient_user_id,
+                    actor_user_id,
+                    type,
+                    title,
+                    message,
+                    related_entity_type,
+                    related_entity_id,
+                    is_read
+                )
+                VALUES (
+                    :id,
+                    :recipient_user_id,
+                    :actor_user_id,
+                    :type,
+                    :title,
+                    :message,
+                    :related_entity_type,
+                    :related_entity_id,
+                    :is_read
+                )
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "recipient_user_id": recipient_id,
+                "actor_user_id": actor_id,
+                "type": "pt_client_invitation_received",
+                "title": "Trainer invite received",
+                "message": "PT invited you.",
+                "related_entity_type": "pt_client_invitation",
+                "related_entity_id": str(uuid4()),
+                "is_read": False,
+            },
+        )
+
+        with (
+            Operations.context(MigrationContext.configure(conn)),
+            pytest.raises(
+                RuntimeError,
+                match="Cannot downgrade invite notification types while invite notifications exist.",
+            ),
+        ):
+            invite_module.downgrade()
+
+
 def test_training_tables_registered_in_metadata() -> None:
     expected_tables = {
         "pt_profiles",
@@ -571,6 +857,12 @@ def test_training_enums_persist_lowercase_values() -> None:
     assert WorkoutLog.__table__.c.mode.type.enums == [mode.value for mode in WorkoutLogMode]
     assert WorkoutLog.__table__.c.completion_status.type.enums == [
         status.value for status in WorkoutCompletionStatus
+    ]
+
+
+def test_notification_enums_persist_lowercase_values() -> None:
+    assert Notification.__table__.c.type.type.enums == [
+        notification_type.value for notification_type in NotificationType
     ]
 
 
